@@ -1,0 +1,7 @@
+{
+  "name": "Ghar-ka-System",
+  "description": "A simple, trustworthy rental management system designed for Indian landlords and tenants, focusing on monthly rent cycles, utility bills, and easy reminders.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
