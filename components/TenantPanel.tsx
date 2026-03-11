@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { User, Property, InterestRequest, PropertyFloor, RentNotice, AppNotification, Complaint, ComplaintStatus, ComplaintPriority, RentRecord, RentPaymentRecord } from '../types';
 import { db, storage } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
@@ -70,6 +71,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   // ── Rent Records State
   const [myRentRecords, setMyRentRecords] = useState<RentRecord[]>([]);
   const [myPayments, setMyPayments] = useState<RentPaymentRecord[]>([]);
+
+  // ── QR / UPI Copy State
+  const [upiCopied, setUpiCopied] = useState(false);
 
   const t = TRANSLATIONS[lang];
 
@@ -1172,37 +1176,132 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
 
         {/* Pay Rent Modal */}
         <Modal isOpen={isPayModalOpen} onClose={() => { setIsPayModalOpen(false); setSelectedNotice(null); }} title="Confirm Rent Payment">
-          {selectedNotice && (
-            <div className="space-y-5">
-              <div className="bg-[#EEF2FF] p-4 rounded-xl border border-[#C7D2FE]">
-                <p className="text-sm text-gray-500">Month</p>
-                <p className="font-bold text-gray-800">{selectedNotice.month}</p>
-                <p className="text-sm text-gray-500 mt-2">Amount Due</p>
-                <p className="text-3xl font-bold text-[#4B5EAA]">₹{selectedNotice.rentAmount}</p>
-                <p className="text-xs text-gray-500 mt-1">Due Date: {selectedNotice.dueDate}</p>
-              </div>
-              <div>
-                <label className="block text-sm font-bold text-gray-700 mb-2">Payment Method</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {['UPI', 'Cash', 'Bank Transfer', 'Cheque', 'Card', 'Wallet'].map(method => (
-                    <label key={method} className={`cursor-pointer border-2 rounded-xl p-2 text-center text-sm font-semibold transition-all ${paymentMethod === method ? 'border-[#4B5EAA] bg-[#EEF2FF] text-[#4B5EAA]' : 'border-[#EAEAEA] text-gray-500 hover:border-gray-300'}`}>
-                      <input type="radio" className="hidden" name="payMethod" checked={paymentMethod === method} onChange={() => setPaymentMethod(method)} />
-                      {method}
-                    </label>
-                  ))}
+          {selectedNotice && (() => {
+            const UPI_ID = 'rentease@upi';
+            const upiUri = `upi://pay?pa=${UPI_ID}&pn=RentEase&am=${selectedNotice.rentAmount}&cu=INR&tn=Rent-${selectedNotice.month.replace(/\s/g, '-')}`;
+            const handleCopyUpi = () => {
+              navigator.clipboard.writeText(UPI_ID).then(() => {
+                setUpiCopied(true);
+                setTimeout(() => setUpiCopied(false), 2000);
+              });
+            };
+            return (
+              <div className="space-y-5">
+                {/* Notice Summary */}
+                <div className="bg-gradient-to-br from-[#EEF2FF] to-[#E0E7FF] p-4 rounded-2xl border border-[#C7D2FE]">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-xs font-semibold text-[#6366F1] uppercase tracking-wider mb-1">Rent Notice</p>
+                      <p className="font-bold text-gray-800 text-lg">{selectedNotice.month}</p>
+                      <p className="text-xs text-gray-500 mt-1">Due: {selectedNotice.dueDate}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-gray-400 mb-1">Amount Due</p>
+                      <p className="text-3xl font-extrabold text-[#4B5EAA]">₹{selectedNotice.rentAmount}</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Payment Method */}
+                <div>
+                  <label className="block text-sm font-bold text-gray-700 mb-2">Select Payment Method</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {['UPI', 'Cash', 'Bank Transfer', 'Cheque', 'Card', 'Wallet'].map(method => (
+                      <label key={method} className={`cursor-pointer border-2 rounded-xl p-2 text-center text-sm font-semibold transition-all ${paymentMethod === method
+                        ? 'border-[#4B5EAA] bg-[#EEF2FF] text-[#4B5EAA] shadow-sm'
+                        : 'border-[#EAEAEA] text-gray-500 hover:border-[#4B5EAA]/40'
+                        }`}>
+                        <input type="radio" className="hidden" name="payMethod" checked={paymentMethod === method} onChange={() => setPaymentMethod(method)} />
+                        {method === 'UPI' && <span className="block text-base mb-0.5">📱</span>}
+                        {method === 'Cash' && <span className="block text-base mb-0.5">💵</span>}
+                        {method === 'Bank Transfer' && <span className="block text-base mb-0.5">🏦</span>}
+                        {method === 'Cheque' && <span className="block text-base mb-0.5">📄</span>}
+                        {method === 'Card' && <span className="block text-base mb-0.5">💳</span>}
+                        {method === 'Wallet' && <span className="block text-base mb-0.5">👛</span>}
+                        {method}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── QR Code Section (UPI only) ── */}
+                {paymentMethod === 'UPI' && (
+                  <div className="bg-white border-2 border-dashed border-[#A5B4FC] rounded-2xl p-5 flex flex-col items-center gap-4">
+                    <div className="text-center">
+                      <p className="text-sm font-bold text-[#4B5EAA] mb-0.5">Scan to Pay via UPI</p>
+                      <p className="text-xs text-gray-400">Use any UPI app — PhonePe, GPay, Paytm, BHIM</p>
+                    </div>
+
+                    {/* QR Box */}
+                    <div className="relative p-3 bg-white rounded-2xl shadow-lg border border-[#E0E7FF]">
+                      {/* Corner decorations */}
+                      <div className="absolute top-1.5 left-1.5 w-4 h-4 border-t-2 border-l-2 border-[#4B5EAA] rounded-tl"></div>
+                      <div className="absolute top-1.5 right-1.5 w-4 h-4 border-t-2 border-r-2 border-[#4B5EAA] rounded-tr"></div>
+                      <div className="absolute bottom-1.5 left-1.5 w-4 h-4 border-b-2 border-l-2 border-[#4B5EAA] rounded-bl"></div>
+                      <div className="absolute bottom-1.5 right-1.5 w-4 h-4 border-b-2 border-r-2 border-[#4B5EAA] rounded-br"></div>
+                      <QRCodeSVG
+                        value={upiUri}
+                        size={180}
+                        bgColor="#FFFFFF"
+                        fgColor="#1E1B4B"
+                        level="H"
+                        includeMargin={true}
+                        imageSettings={{
+                          src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%234B5EAA'%3E%3Cpath d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z'/%3E%3C/svg%3E",
+                          x: undefined,
+                          y: undefined,
+                          height: 28,
+                          width: 28,
+                          excavate: true,
+                        }}
+                      />
+                    </div>
+
+                    {/* Amount badge */}
+                    <div className="bg-[#4B5EAA] text-white text-sm font-bold px-5 py-1.5 rounded-full shadow">
+                      ₹{selectedNotice.rentAmount} — {selectedNotice.month}
+                    </div>
+
+                    {/* UPI ID copy row */}
+                    <div className="w-full bg-[#F5F3FF] border border-[#DDD6FE] rounded-xl px-4 py-2.5 flex items-center justify-between gap-3">
+                      <div>
+                        <p className="text-[10px] font-semibold text-[#7C3AED] uppercase tracking-wider">UPI ID</p>
+                        <p className="font-mono font-bold text-gray-800 text-sm">{UPI_ID}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleCopyUpi}
+                        className="flex items-center gap-1.5 bg-[#4B5EAA] hover:bg-[#3D4D8C] text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all active:scale-95"
+                      >
+                        {upiCopied ? (
+                          <><svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" /></svg> Copied!</>
+                        ) : (
+                          <><svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a.75.75 0 0 1-.75.75H9a.75.75 0 0 1-.75-.75v0c0-.212.03-.418.084-.612m7.332 0c.646.049 1.288.11 1.927.184 1.1.128 1.907 1.077 1.907 2.185V19.5a2.25 2.25 0 0 1-2.25 2.25H6.75A2.25 2.25 0 0 1 4.5 19.5V6.257c0-1.108.806-2.057 1.907-2.185a48.208 48.208 0 0 1 1.927-.184" /></svg> Copy</>
+                        )}
+                      </button>
+                    </div>
+
+                    <p className="text-[11px] text-gray-400 text-center">After scanning, verify the amount is ₹{selectedNotice.rentAmount} before paying</p>
+                  </div>
+                )}
+
+                {/* Warning */}
+                <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-xl text-sm text-yellow-800">
+                  ⚠️ Clicking <strong>"Confirm Payment"</strong> records your payment intent in the system. Please also complete the actual transfer via the selected method.
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3">
+                  <Button variant="outline" fullWidth onClick={() => { setIsPayModalOpen(false); setSelectedNotice(null); }}>Cancel</Button>
+                  <Button fullWidth disabled={!!payingNoticeId} onClick={handlePayRent}>
+                    {payingNoticeId
+                      ? <span className="flex items-center justify-center gap-2"><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>Processing...</span>
+                      : `Confirm Payment (₹${selectedNotice.rentAmount})`}
+                  </Button>
                 </div>
               </div>
-              <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-xl text-sm text-yellow-800">
-                ⚠️ This records your payment intent. Please also complete the actual payment to your owner via the selected method.
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline" fullWidth onClick={() => { setIsPayModalOpen(false); setSelectedNotice(null); }}>Cancel</Button>
-                <Button fullWidth disabled={!!payingNoticeId} onClick={handlePayRent}>
-                  {payingNoticeId ? 'Processing...' : `Confirm Payment (₹${selectedNotice.rentAmount})`}
-                </Button>
-              </div>
-            </div>
-          )}
+            );
+          })()}
         </Modal>
 
       </div>
