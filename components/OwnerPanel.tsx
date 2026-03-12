@@ -58,7 +58,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     rentAmount: '',
     moveInDate: ''
   });
-  const [manualTenantFile, setManualTenantFile] = useState<File | null>(null);
+
   const [selectedFloorForManual, setSelectedFloorForManual] = useState<PropertyFloor | null>(null);
   const [submittingManualTenant, setSubmittingManualTenant] = useState(false);
 
@@ -550,12 +550,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     setSubmittingManualTenant(true);
 
     try {
-      let idUrl = '';
-      if (manualTenantFile) {
-        const fileRef = ref(storage, `documents/manual_tenants/id_${Date.now()}_${manualTenantFile.name}`);
-        await uploadBytes(fileRef, manualTenantFile);
-        idUrl = await getDownloadURL(fileRef);
-      }
+
 
       const tenantId = `mt_${Date.now()}`;
 
@@ -564,7 +559,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         tenantName: manualTenantForm.tenantName,
         phone: manualTenantForm.phoneNumber,
         aadhaarNumber: manualTenantForm.aadhaarNumber,
-        idProofUrl: idUrl,
+
         propertyId: selectedPropertyForFloors.id,
         floorId: selectedFloorForManual.id,
         rentAmount: Number(manualTenantForm.rentAmount) || selectedFloorForManual.rentPrice,
@@ -585,7 +580,6 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
       setManualTenantForm({
         tenantName: '', phoneNumber: '', aadhaarNumber: '', rentAmount: '', moveInDate: ''
       });
-      setManualTenantFile(null);
       setSelectedFloorForManual(null);
     } catch (err) {
       console.error(err);
@@ -1519,10 +1513,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <label className="block text-sm font-medium mb-1">Aadhaar Number (Optional)</label>
               <input value={manualTenantForm.aadhaarNumber} onChange={e => setManualTenantForm({ ...manualTenantForm, aadhaarNumber: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA]" />
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">ID Proof Upload (Optional)</label>
-              <input type="file" accept="image/*,.pdf" onChange={e => setManualTenantFile(e.target.files?.[0] || null)} className="w-full text-sm p-2 border border-[#EAEAEA] rounded-xl" />
-            </div>
+
             <div>
               <label className="block text-sm font-medium mb-1">Rent Amount (₹) *</label>
               <input required type="number" value={manualTenantForm.rentAmount} onChange={e => setManualTenantForm({ ...manualTenantForm, rentAmount: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA]" />

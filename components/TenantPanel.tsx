@@ -34,20 +34,15 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const [selectedFloors, setSelectedFloors] = useState<PropertyFloor[]>([]);
   const [ownerDocs, setOwnerDocs] = useState<Record<string, User>>({});
 
-  // Document Upload States
-  const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
-  const [idProofFile, setIdProofFile] = useState<File | null>(null);
-  const [photoFile, setPhotoFile] = useState<File | null>(null);
+  // Application Form States
+  const [applyAadhaar, setApplyAadhaar] = useState<string>(user.aadhaarNumber || '');
+  const [applyPhone, setApplyPhone] = useState<string>(user.phone || '');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
   const [uploadError, setUploadError] = useState<string>('');
-  const [fileErrors, setFileErrors] = useState<{ aadhaar?: string; idProof?: string; photo?: string }>({});
-
   // Profile Edit States
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [editProfileData, setEditProfileData] = useState({ name: user.name, phone: user.phone, email: user.email || '' });
-  const [profileAadhaarFile, setProfileAadhaarFile] = useState<File | null>(null);
-  const [profileIdProofFile, setProfileIdProofFile] = useState<File | null>(null);
+  const [editProfileData, setEditProfileData] = useState({ name: user.name, phone: user.phone, email: user.email || '', aadhaarNumber: user.aadhaarNumber || '' });
   const [profilePhotoEditFile, setProfilePhotoEditFile] = useState<File | null>(null);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
 
@@ -247,60 +242,6 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     setIsApplyModalOpen(true);
   };
 
-  // ── File size validation (max 2 MB) ─────────────────────────────────────
-  const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
-
-  const validateFileSize = (file: File): string | null => {
-    if (file.size > MAX_FILE_SIZE) {
-      return 'File size too large. Please upload a file less than 2MB.';
-    }
-    return null;
-  };
-
-  const handleFileChange = (
-    file: File | null,
-    field: 'aadhaar' | 'idProof' | 'photo',
-    setter: (f: File | null) => void
-  ) => {
-    if (!file) { setter(null); return; }
-    const err = validateFileSize(file);
-    setFileErrors(prev => ({ ...prev, [field]: err || undefined }));
-    if (!err) setter(file);
-    else setter(null);
-  };
-
-  // ── Image compression via canvas (images only, max 1200px, JPEG 0.82) ─────
-  const compressImage = (file: File): Promise<File> => {
-    return new Promise((resolve) => {
-      if (!file.type.startsWith('image/')) { resolve(file); return; }
-
-      const img = new Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const MAX_WIDTH = 1200; // max 1200px wide
-        let { width, height } = img;
-        if (width > MAX_WIDTH) {
-          height = Math.round(height * MAX_WIDTH / width);
-          width = MAX_WIDTH;
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
-        canvas.toBlob(
-          (blob) => {
-            if (blob) resolve(new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg', lastModified: Date.now() }));
-            else resolve(file);
-          },
-          'image/jpeg', 0.82
-        );
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
-      img.src = url;
-    });
-  };
-
   // ── Upload helper with 3-attempt exponential-backoff retry ───────────────
   const uploadFile = async (file: File, folder: string): Promise<string> => {
     const MAX_RETRIES = 3;
@@ -313,7 +254,6 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       } catch (err) {
         lastErr = err;
         if (attempt < MAX_RETRIES) {
-          // back-off: 1s, 2s
           await new Promise(r => setTimeout(r, attempt * 1000));
         }
       }
@@ -321,7 +261,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     throw lastErr;
   };
 
-  // ── Submit request with parallel uploads ─────────────────────────────────
+  // ── Submit request ─────────────────────────────────
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedProperty || !user.id || selectedFloors.length === 0) {
@@ -329,9 +269,8 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       return;
     }
 
-    // Block submission if any file error exists
-    if (fileErrors.aadhaar || fileErrors.idProof || fileErrors.photo) {
-      alert('Please fix file size errors before submitting.');
+    if (!applyAadhaar || !applyPhone) {
+      alert('Aadhaar and Phone are required.');
       return;
     }
 
@@ -339,55 +278,15 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     setUploadProgress('');
 
     try {
-      let docsRef = {
-        aadhaarUrl: user.documents?.aadhaarUrl || '',
-        idProofUrl: user.documents?.idProofUrl || '',
-        profilePhotoUrl: user.documents?.profilePhotoUrl || '',
-      };
-
-      // Step 1: Compress images in parallel
-      if (aadhaarFile || idProofFile || photoFile) {
-        setUploadProgress('🗜️ Compressing images...');
-        const [compAadhaar, compIdProof, compPhoto] = await Promise.all([
-          aadhaarFile ? compressImage(aadhaarFile) : Promise.resolve(null),
-          idProofFile ? compressImage(idProofFile) : Promise.resolve(null),
-          photoFile ? compressImage(photoFile) : Promise.resolve(null),
-        ]);
-
-        // Step 2: Upload all files in parallel
-        setUploadProgress('☁️ Uploading documents (0/3)...');
-        let done = 0;
-        const uploadWithCount = async (file: File | null, folder: string): Promise<string | null> => {
-          if (!file) return null;
-          const url = await uploadFile(file, folder);
-          done++;
-          setUploadProgress(`☁️ Uploading documents (${done}/${[compAadhaar, compIdProof, compPhoto].filter(Boolean).length})...`);
-          return url;
-        };
-
-        const [newAadhaar, newIdProof, newPhoto] = await Promise.all([
-          uploadWithCount(compAadhaar, 'aadhaar'),
-          uploadWithCount(compIdProof, 'idProof'),
-          uploadWithCount(compPhoto, 'photo'),
-        ]);
-
-        if (newAadhaar) docsRef.aadhaarUrl = newAadhaar;
-        if (newIdProof) docsRef.idProofUrl = newIdProof;
-        if (newPhoto) docsRef.profilePhotoUrl = newPhoto;
-
-        // Step 3: Save docs to Firestore
-        setUploadProgress('💾 Saving profile...');
-        const uQ = query(collection(db, 'users'), where('userId', '==', user.id));
-        const uSnap = await getDocs(uQ);
-        if (!uSnap.empty) {
-          await updateDoc(doc(db, 'users', uSnap.docs[0].id), { documents: docsRef });
-        }
-        await login({ ...user, documents: docsRef });
-      }
-
-      if (!docsRef.aadhaarUrl || !docsRef.idProofUrl || !docsRef.profilePhotoUrl) {
-        alert('All 3 documents are required to apply!');
-        return;
+      // Update user details if changed
+      const uQ = query(collection(db, 'users'), where('userId', '==', user.id));
+      const uSnap = await getDocs(uQ);
+      if (!uSnap.empty) {
+        await updateDoc(doc(db, 'users', uSnap.docs[0].id), { 
+          aadhaarNumber: applyAadhaar,
+          phone: applyPhone
+        });
+        await login({ ...user, aadhaarNumber: applyAadhaar, phone: applyPhone });
       }
 
       setUploadProgress('📨 Submitting request...');
@@ -404,24 +303,16 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       setIsApplyModalOpen(false);
       setSelectedProperty(null);
       setSelectedFloors([]);
-      setAadhaarFile(null);
-      setIdProofFile(null);
-      setPhotoFile(null);
-      setFileErrors({});
+      setApplyAadhaar(user.aadhaarNumber || '');
+      setApplyPhone(user.phone || '');
       setUploadProgress('');
       setUploadError('');
 
       alert('Request sent successfully! The owner will review your application.');
       setActiveTab('requests');
     } catch (err: any) {
-      console.error('Upload failed:', err);
-      setUploadError(
-        err?.code === 'storage/unauthorized'
-          ? 'Upload failed: Storage permission denied. Please contact support.'
-          : err?.code === 'storage/network-request-failed' || err?.message?.includes('network')
-            ? 'Upload failed: Network error. Please check your connection and retry.'
-            : 'Upload failed after 3 attempts. Please retry.'
-      );
+      console.error('Request failed:', err);
+      setUploadError('Failed to submit request. Please retry.');
     } finally {
       setIsSubmitting(false);
       setUploadProgress('');
@@ -443,25 +334,26 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       const userDocId = uSnap.docs[0].id;
 
       let photoUrl = user.profilePhoto || user.documents?.profilePhotoUrl;
-      let aadhaarUrl = user.aadhaarUrl || user.documents?.aadhaarUrl;
-      let idProofUrl = user.idProofUrl || user.documents?.idProofUrl;
-
       if (profilePhotoEditFile) photoUrl = await uploadFile(profilePhotoEditFile, 'photo');
-      if (profileAadhaarFile) aadhaarUrl = await uploadFile(profileAadhaarFile, 'aadhaar');
-      if (profileIdProofFile) idProofUrl = await uploadFile(profileIdProofFile, 'idProof');
 
       const updateData = {
         name: editProfileData.name,
         phone: editProfileData.phone,
         email: editProfileData.email || null,
         profilePhoto: photoUrl,
-        aadhaarUrl,
-        idProofUrl,
-        documents: { profilePhotoUrl: photoUrl, aadhaarUrl, idProofUrl }
+        aadhaarNumber: editProfileData.aadhaarNumber
       };
 
       await updateDoc(doc(db, 'users', userDocId), updateData);
-      await login({ ...user, name: editProfileData.name, phone: editProfileData.phone, email: editProfileData.email, profilePhoto: photoUrl, aadhaarUrl, idProofUrl, documents: updateData.documents });
+
+      await login({
+        ...user,
+        name: editProfileData.name,
+        phone: editProfileData.phone,
+        email: editProfileData.email,
+        profilePhoto: photoUrl,
+        aadhaarNumber: editProfileData.aadhaarNumber
+      });
 
       setIsEditingProfile(false);
       alert('Profile updated successfully!');
@@ -472,6 +364,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       setProfileSubmitting(false);
     }
   };
+
 
   // ── Pay Rent Handler
   const handlePayRent = async () => {
@@ -615,16 +508,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                       <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">Email <span className="text-gray-300 normal-case font-normal">(Optional)</span></p>
                       <p className="text-lg font-bold text-gray-800">{user.email || <span className="text-gray-400 italic">Not provided</span>}</p>
                     </div>
-                    <div>
-                      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-2">Documents</p>
-                      <div className="flex gap-3 text-sm">
-                        {(user.aadhaarUrl || user.documents?.aadhaarUrl) ? (
-                          <a href={user.aadhaarUrl || user.documents?.aadhaarUrl} target="_blank" rel="noreferrer" className="text-[#1565C0] underline font-medium">Aadhaar Card</a>
-                        ) : <span className="text-gray-400 text-xs">No Aadhaar</span>}
-                        {(user.idProofUrl || user.documents?.idProofUrl) ? (
-                          <a href={user.idProofUrl || user.documents?.idProofUrl} target="_blank" rel="noreferrer" className="text-[#1565C0] underline ml-2 font-medium">ID Proof</a>
-                        ) : <span className="text-gray-400 text-xs ml-2">No ID Proof</span>}
-                      </div>
+                    <div className="pb-4 border-b border-gray-100">
+                      <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">Aadhaar Number</p>
+                      <p className="text-lg font-bold text-gray-800">{user.aadhaarNumber || <span className="text-gray-400 italic">Not provided</span>}</p>
                     </div>
                   </div>
                 </div>
@@ -659,21 +545,14 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                         <label className="block text-sm font-medium text-gray-700 mb-1">Email <span className="text-gray-400 font-normal">(Optional)</span></label>
                         <input type="email" value={editProfileData.email} onChange={e => setEditProfileData({ ...editProfileData, email: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6] focus:border-[#4B5EAA] focus:ring-1 focus:ring-[#4B5EAA]" />
                       </div>
-                      <div className="pt-2 border-t border-gray-100 mt-4 space-y-4">
-                        <h4 className="font-bold text-gray-700 mb-2">Update Documents</h4>
-                        <div>
-                          <label className="block text-sm font-medium text-[#1565C0] mb-1">Aadhaar Card {(user.aadhaarUrl || user.documents?.aadhaarUrl) && <span className="text-green-600 font-bold ml-2">✓ Has file</span>}</label>
-                          <input type="file" accept="image/*,.pdf" onChange={e => setProfileAadhaarFile(e.target.files?.[0] || null)} className="w-full text-sm text-blue-800 bg-white border border-blue-200 rounded p-2" />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-[#1565C0] mb-1">ID Proof {(user.idProofUrl || user.documents?.idProofUrl) && <span className="text-green-600 font-bold ml-2">✓ Has file</span>}</label>
-                          <input type="file" accept="image/*,.pdf" onChange={e => setProfileIdProofFile(e.target.files?.[0] || null)} className="w-full text-sm text-blue-800 bg-white border border-blue-200 rounded p-2" />
-                        </div>
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-1">Aadhaar Number</label>
+                        <input value={editProfileData.aadhaarNumber} onChange={e => setEditProfileData({ ...editProfileData, aadhaarNumber: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6] focus:border-[#4B5EAA] focus:ring-1 focus:ring-[#4B5EAA]" placeholder="12-digit Aadhaar Number" />
                       </div>
                     </div>
                   </div>
                   <div className="flex gap-3 pt-4 border-t border-gray-100 mt-6 justify-end">
-                    <Button type="button" variant="outline" onClick={() => { setIsEditingProfile(false); setProfilePhotoEditFile(null); setProfileAadhaarFile(null); setProfileIdProofFile(null); setEditProfileData({ name: user.name, phone: user.phone, email: user.email || '' }); }}>Cancel</Button>
+                    <Button type="button" variant="outline" onClick={() => { setIsEditingProfile(false); setProfilePhotoEditFile(null); setEditProfileData({ name: user.name, phone: user.phone, email: user.email || '', aadhaarNumber: user.aadhaarNumber || '' }); }}>Cancel</Button>
                     <Button type="submit" disabled={profileSubmitting}>{profileSubmitting ? 'Saving...' : 'Save Changes'}</Button>
                   </div>
                 </form>
@@ -842,52 +721,31 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               </div>
             )}
             <div className="bg-[#E3F2FD] p-4 rounded-xl border border-[#BBDEFB]">
-              <h4 className="font-bold text-[#1565C0] flex items-center gap-2 mb-1"><Icons.Users /> Required Documents</h4>
-              <p className="text-xs text-[#1565C0] mb-4">Max file size: <strong>2MB</strong>. Images are compressed automatically. If you've already uploaded files before, you don't need to re-upload them.</p>
-              <div className="space-y-3">
-
-                {/* Aadhaar */}
+              <h4 className="font-bold text-[#1565C0] flex items-center gap-2 mb-1"><Icons.Users /> Details Required</h4>
+              <p className="text-xs text-[#1565C0] mb-4">Please enter your Aadhaar and Phone Number.</p>
+              <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-[#1565C0] mb-1">
-                    Aadhaar Card {user.documents?.aadhaarUrl && <span className="text-green-600 font-bold ml-2">✓ Uploaded</span>}
-                  </label>
+                  <label className="block text-sm font-medium text-[#1565C0] mb-1">Aadhaar Number <span className="text-red-500">*</span></label>
                   <input
-                    type="file" accept="image/*,.pdf"
-                    onChange={e => handleFileChange(e.target.files?.[0] || null, 'aadhaar', setAadhaarFile)}
-                    className={`w-full text-sm text-blue-800 bg-white border rounded p-2 ${fileErrors.aadhaar ? 'border-red-400 bg-red-50' : 'border-blue-200'}`}
-                    required={!user.documents?.aadhaarUrl}
+                    type="text"
+                    required
+                    value={applyAadhaar}
+                    onChange={e => setApplyAadhaar(e.target.value)}
+                    className="w-full text-sm text-blue-800 bg-white border border-blue-200 rounded p-3"
+                    placeholder="Enter 12-digit Aadhaar Number"
                   />
-                  {fileErrors.aadhaar && <p className="text-xs text-red-600 mt-1 font-medium">⚠️ {fileErrors.aadhaar}</p>}
                 </div>
-
-                {/* ID Proof */}
                 <div>
-                  <label className="block text-sm font-medium text-[#1565C0] mb-1">
-                    ID Proof (PAN / Driver's License) {user.documents?.idProofUrl && <span className="text-green-600 font-bold ml-2">✓ Uploaded</span>}
-                  </label>
+                  <label className="block text-sm font-medium text-[#1565C0] mb-1">Phone Number <span className="text-red-500">*</span></label>
                   <input
-                    type="file" accept="image/*,.pdf"
-                    onChange={e => handleFileChange(e.target.files?.[0] || null, 'idProof', setIdProofFile)}
-                    className={`w-full text-sm text-blue-800 bg-white border rounded p-2 ${fileErrors.idProof ? 'border-red-400 bg-red-50' : 'border-blue-200'}`}
-                    required={!user.documents?.idProofUrl}
+                    type="tel"
+                    required
+                    value={applyPhone}
+                    onChange={e => setApplyPhone(e.target.value)}
+                    className="w-full text-sm text-blue-800 bg-white border border-blue-200 rounded p-3"
+                    placeholder="Enter Phone Number"
                   />
-                  {fileErrors.idProof && <p className="text-xs text-red-600 mt-1 font-medium">⚠️ {fileErrors.idProof}</p>}
                 </div>
-
-                {/* Profile Photo */}
-                <div>
-                  <label className="block text-sm font-medium text-[#1565C0] mb-1">
-                    Profile Photo {user.documents?.profilePhotoUrl && <span className="text-green-600 font-bold ml-2">✓ Uploaded</span>}
-                  </label>
-                  <input
-                    type="file" accept="image/*"
-                    onChange={e => handleFileChange(e.target.files?.[0] || null, 'photo', setPhotoFile)}
-                    className={`w-full text-sm text-blue-800 bg-white border rounded p-2 ${fileErrors.photo ? 'border-red-400 bg-red-50' : 'border-blue-200'}`}
-                    required={!user.documents?.profilePhotoUrl}
-                  />
-                  {fileErrors.photo && <p className="text-xs text-red-600 mt-1 font-medium">⚠️ {fileErrors.photo}</p>}
-                </div>
-
               </div>
             </div>
 
@@ -923,7 +781,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               <Button type="button" variant="outline" onClick={() => { setIsApplyModalOpen(false); setUploadError(''); }} fullWidth className="py-3 font-semibold">Cancel</Button>
               <Button
                 type="submit"
-                disabled={isSubmitting || selectedFloors.length === 0 || !!(fileErrors.aadhaar || fileErrors.idProof || fileErrors.photo)}
+                disabled={isSubmitting || selectedFloors.length === 0 || !applyAadhaar || !applyPhone}
                 fullWidth
                 className="py-3 font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
               >
