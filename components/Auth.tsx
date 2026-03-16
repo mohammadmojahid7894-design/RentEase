@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { db } from '../firebase';
-import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, updateDoc } from 'firebase/firestore';
 import { User, UserRole } from '../types';
 import { Icons } from '../constants';
 
@@ -212,15 +212,54 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                 userId,
                 systemId,
                 password: regPassword,
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                smsSent: false,
+                emailSent: false,
+                notificationSentAt: null
             };
 
-            await addDoc(usersRef, userData);
+            const docRef = await addDoc(usersRef, userData);
+
+            // Trigger Welcome API for SMS & Email
+            let smsSuccess = false;
+            let emailSuccess = false;
+            try {
+                const apiRes = await fetch('/api/sendWelcome', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: userData.name,
+                        phone: userData.phone,
+                        email: userData.email,
+                        role: userData.role
+                    })
+                });
+                
+                if (apiRes.ok) {
+                    const notifyData = await apiRes.json();
+                    smsSuccess = notifyData.smsSent;
+                    emailSuccess = notifyData.emailSent;
+                }
+            } catch (notifyErr) {
+                console.error("Failed to trigger welcome notifications:", notifyErr);
+            }
+
+            // Update user document with notification status
+            try {
+                await updateDoc(docRef, {
+                    smsSent: smsSuccess,
+                    emailSent: emailSuccess,
+                    notificationSentAt: new Date().toISOString()
+                });
+            } catch (updateErr) {
+                console.error("Failed to update notification status in DB:", updateErr);
+            }
 
             alert(
                 `✅ Account created successfully!\n\n` +
                 `Your System ID: ${systemId}\n\n` +
-                `Use this ID + your password to login.\nPlease save it somewhere safe.`
+                `Use this ID + your password to login.\nPlease save it somewhere safe.\n\n` +
+                `A confirmation SMS and email have been initiated.`
             );
 
             const userObj: User = {
