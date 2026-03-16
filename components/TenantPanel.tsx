@@ -371,21 +371,44 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     if (!selectedNotice?.id || !user.id) return;
     setPayingNoticeId(selectedNotice.id);
     try {
-      // Update notice status to paid
-      const noticeQuery = query(collection(db, 'notices'), where('tenantId', '==', user.id));
+      // Sync Notices: mark matching notices for this month as paid
+      const noticeQuery = query(
+        collection(db, 'notices'), 
+        where('tenantId', '==', user.id),
+        where('propertyId', '==', selectedNotice.propertyId),
+        where('month', '==', selectedNotice.month)
+      );
       const noticeSnap = await getDocs(noticeQuery);
-      const noticeDoc = noticeSnap.docs.find(d => d.id === selectedNotice.id);
-      if (noticeDoc) await updateDoc(doc(db, 'notices', noticeDoc.id), { status: 'paid' });
+      for (const nDoc of noticeSnap.docs) {
+         await updateDoc(doc(db, 'notices', nDoc.id), { status: 'paid' });
+      }
+
+      // Sync RentRecords: mark matching rent record for this month as paid
+      const recordsQ = query(
+        collection(db, 'rentRecords'), 
+        where('tenantId', '==', user.id), 
+        where('propertyId', '==', selectedNotice.propertyId), 
+        where('month', '==', selectedNotice.month)
+      );
+      const recordsSnap = await getDocs(recordsQ);
+      for (const rDoc of recordsSnap.docs) {
+         await updateDoc(doc(db, 'rentRecords', rDoc.id), {
+            status: 'paid',
+            paymentDate: new Date().toISOString()
+         });
+      }
 
       // Save payment record
       await addDoc(collection(db, 'rent_payments'), {
         tenantId: user.id,
+        ownerId: selectedNotice.ownerId,
         propertyId: selectedNotice.propertyId,
         noticeId: selectedNotice.id,
         amount: selectedNotice.rentAmount,
         month: selectedNotice.month,
         paymentDate: new Date().toISOString(),
         paymentMethod,
+        transactionId: `TXN-${Math.random().toString(36).substring(2, 10).toUpperCase()}`,
         status: 'completed',
         createdAt: new Date().toISOString()
       });
@@ -900,6 +923,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                           <th className="text-left p-3 text-xs font-semibold text-gray-500 uppercase">Amount</th>
                           <th className="text-left p-3 text-xs font-semibold text-gray-500 uppercase">Due Date</th>
                           <th className="text-left p-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
+                          <th className="text-right p-3 text-xs font-semibold text-gray-500 uppercase">Action</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -910,6 +934,32 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                             <td className="p-3 text-gray-600">{rec.dueDate}</td>
                             <td className="p-3">
                               <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${rec.status === 'paid' ? 'bg-green-100 text-green-700' : rec.status === 'late' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{rec.status}</span>
+                            </td>
+                            <td className="p-3 text-right">
+                              {rec.status !== 'paid' && (
+                                <Button 
+                                  variant="primary" 
+                                  className="!px-3 !py-1 !text-xs" 
+                                  onClick={() => { 
+                                    const prop = allProperties.find(p => p.id === rec.propertyId);
+                                    setSelectedNotice({
+                                      id: `record_${rec.id}`, // dummy id because we don't have a notice id
+                                      tenantId: rec.tenantId,
+                                      propertyId: rec.propertyId,
+                                      ownerId: prop?.ownerId || '',
+                                      month: rec.month,
+                                      rentAmount: rec.rentAmount,
+                                      dueDate: rec.dueDate,
+                                      status: 'pending',
+                                      message: 'Rent Record Payment',
+                                      createdAt: new Date().toISOString()
+                                    } as any); 
+                                    setIsPayModalOpen(true); 
+                                  }}
+                                >
+                                  Pay
+                                </Button>
+                              )}
                             </td>
                           </tr>
                         ))}

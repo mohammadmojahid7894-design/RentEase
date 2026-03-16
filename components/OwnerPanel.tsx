@@ -24,7 +24,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   const [tenants, setTenants] = useState<Record<string, User>>({}); // tenantId -> User
   const [manualTenants, setManualTenants] = useState<Record<string, any>>({}); // tenantId -> ManualTenant
 
-  const [ownerStats, setOwnerStats] = useState({ totalProperties: 0, totalFloors: 0, occupied: 0, vacant: 0 });
+  const [ownerStats, setOwnerStats] = useState({ totalProperties: 0, totalFloors: 0, occupied: 0, vacant: 0, totalMonthlyRentConfigured: 0 });
   const [propertyStats, setPropertyStats] = useState<Record<string, { totalFloors: number, occupied: number, vacant: number }>>({});
 
   const [loading, setLoading] = useState(true);
@@ -129,12 +129,17 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
       let tFloors = 0;
       let occ = 0;
       const pStats: Record<string, { totalFloors: number, occupied: number, vacant: number }> = {};
+      let tRent = 0;
       for (const p of sortedProps) {
         const uSnap = await getDocs(query(collection(db, `properties/${p.id}/floors`)));
         const pTotal = uSnap.docs.length;
         let pOcc = 0;
         uSnap.forEach(d => {
-          if (d.data().status === 'occupied') { occ++; pOcc++; }
+          if (d.data().status === 'occupied') { 
+             occ++; 
+             pOcc++; 
+             tRent += Number(d.data().rentPrice) || 0;
+          }
         });
         tFloors += pTotal;
         pStats[p.id] = { totalFloors: pTotal, occupied: pOcc, vacant: pTotal - pOcc };
@@ -144,7 +149,8 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         totalProperties: sortedProps.length,
         totalFloors: tFloors,
         occupied: occ,
-        vacant: tFloors - occ
+        vacant: tFloors - occ,
+        totalMonthlyRentConfigured: tRent
       });
     });
     return () => unsubscribe();
@@ -267,15 +273,21 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     return () => clearInterval(iv);
   }, [properties, user.id]);
 
-  // Compute financial stats from rent records
+  // Compute financial stats from actual payments and records
   useEffect(() => {
-    const totalMonthlyRent = rentRecords.reduce((s, r) => s + r.rentAmount, 0);
+    // Total Monthly Rent = Fixed Expectation computed from occupied floors
+    const totalMonthlyRent = ownerStats.totalMonthlyRentConfigured || 0;
+    
+    // Actually sum up real payments for "Total Paid" instead of only relying on rentRecords that are paid.
+    // However, if the owner manually marks a record as paid but there's no payment record, it should still count.
+    // Wait, rentRecords handles this cleanly now since payment modal syncs the two.
     const totalPaid = rentRecords.filter(r => r.status === 'paid').reduce((s, r) => s + r.rentAmount, 0);
     const totalPending = rentRecords.filter(r => r.status === 'pending').reduce((s, r) => s + r.rentAmount, 0);
     const totalLate = rentRecords.filter(r => r.status === 'late').reduce((s, r) => s + r.rentAmount, 0);
     const lateCount = rentRecords.filter(r => r.status === 'late').length;
+    
     setFinancialStats({ totalMonthlyRent, totalPaid, totalPending, totalLate, lateCount });
-  }, [rentRecords]);
+  }, [rentRecords, ownerStats.totalMonthlyRentConfigured]);
 
 
 
@@ -685,6 +697,27 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         createdAt: new Date().toISOString()
       };
       await addDoc(collection(db, 'notices'), noticeData);
+      
+      // Auto-generate a Rent Record if it doesn't exist for financial tracking
+      const recordsQ = query(
+        collection(db, 'rentRecords'), 
+        where('tenantId', '==', noticeForm.tenantId), 
+        where('propertyId', '==', noticeForm.propertyId), 
+        where('month', '==', noticeForm.month)
+      );
+      const recordsSnap = await getDocs(recordsQ);
+      if (recordsSnap.empty) {
+        await addDoc(collection(db, 'rentRecords'), {
+          tenantId: noticeForm.tenantId,
+          propertyId: noticeForm.propertyId,
+          month: noticeForm.month,
+          rentAmount: Number(noticeForm.rentAmount),
+          dueDate: noticeForm.dueDate,
+          status: 'pending',
+          createdAt: new Date().toISOString()
+        });
+      }
+
       // Notify the tenant
       await addDoc(collection(db, 'notifications'), {
         userId: noticeForm.tenantId,
@@ -759,6 +792,22 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         status: 'paid',
         paymentDate: new Date().toISOString()
       });
+
+      // Maintain consistency in Payments tab
+      await addDoc(collection(db, 'rent_payments'), {
+        tenantId: record.tenantId,
+        ownerId: user.id,
+        propertyId: record.propertyId,
+        noticeId: record.id,
+        amount: record.rentAmount,
+        month: record.month,
+        paymentDate: new Date().toISOString(),
+        paymentMethod: 'Manual (Owner)',
+        transactionId: `TXN-MANUAL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+        status: 'completed',
+        createdAt: new Date().toISOString()
+      });
+
       await addDoc(collection(db, 'notifications'), {
         userId: record.tenantId,
         type: 'payment',
@@ -1204,7 +1253,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <div className="bg-gradient-to-br from-[#4B5EAA] to-[#3D4D9A] p-5 rounded-2xl text-white shadow-md">
                 <p className="text-xs font-semibold uppercase tracking-wider opacity-80 mb-1">Total Monthly Rent</p>
                 <p className="text-3xl font-bold">₹{financialStats.totalMonthlyRent.toLocaleString('en-IN')}</p>
-                <p className="text-xs opacity-60 mt-1">{rentRecords.length} records</p>
+                <p className="text-xs opacity-60 mt-1">Expected based on occupied floors</p>
               </div>
               <div className="bg-gradient-to-br from-green-500 to-green-600 p-5 rounded-2xl text-white shadow-md">
                 <p className="text-xs font-semibold uppercase tracking-wider opacity-80 mb-1">Total Paid</p>
