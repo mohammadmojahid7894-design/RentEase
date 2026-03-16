@@ -8,9 +8,10 @@ interface LandingPageProps {
   setLang: (lang: Language) => void;
   onLoginOwner: () => void;
   onLoginTenant: () => void;
+  onLoginAdmin: () => void;
 }
 
-const LandingPage: React.FC<LandingPageProps> = ({ lang, setLang, onLoginOwner, onLoginTenant }) => {
+const LandingPage: React.FC<LandingPageProps> = ({ lang, setLang, onLoginOwner, onLoginTenant, onLoginAdmin }) => {
   const t = TRANSLATIONS[lang];
 
   return (
@@ -139,6 +140,7 @@ const LandingPage: React.FC<LandingPageProps> = ({ lang, setLang, onLoginOwner, 
             <a href="#" className="hover:text-white transition-colors">Privacy</a>
             <a href="#" className="hover:text-white transition-colors">Terms</a>
             <a href="#" className="hover:text-white transition-colors">Contact</a>
+            <button onClick={onLoginAdmin} className="hover:text-white transition-colors underline bg-transparent border-none cursor-pointer">Admin Login</button>
           </div>
         </div>
       </footer>

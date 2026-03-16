@@ -1,7 +1,8 @@
 export enum UserRole {
   OWNER = 'OWNER',
   TENANT = 'TENANT',
-  BROKER = 'BROKER'
+  BROKER = 'BROKER',
+  ADMIN = 'ADMIN'
 }
 
 export enum PropertyType {

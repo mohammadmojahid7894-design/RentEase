@@ -13,7 +13,9 @@ interface AuthProps {
 
 // ── System ID helpers ─────────────────────────────────────────────────────────
 const generateSystemId = (role: UserRole): string => {
-    const prefix = role === UserRole.OWNER ? 'RE-OWN' : 'RE-TEN';
+    let prefix = 'RE-TEN';
+    if (role === UserRole.OWNER) prefix = 'RE-OWN';
+    if (role === UserRole.ADMIN) prefix = 'RE-ADM';
     const digits = String(Math.floor(1000 + Math.random() * 9000)); // 1000-9999
     return `${prefix}-${digits}`;
 };
@@ -27,7 +29,9 @@ const createUniqueSystemId = async (role: UserRole): Promise<string> => {
         if (snap.empty) return candidate;
     }
     // Fallback: extend to 6-digit to reduce collision risk
-    const prefix = role === UserRole.OWNER ? 'RE-OWN' : 'RE-TEN';
+    let prefix = 'RE-TEN';
+    if (role === UserRole.OWNER) prefix = 'RE-OWN';
+    if (role === UserRole.ADMIN) prefix = 'RE-ADM';
     return `${prefix}-${Math.floor(100000 + Math.random() * 900000)}`;
 };
 
@@ -51,6 +55,35 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    // Seed admin on mount if role is admin
+    React.useEffect(() => {
+        if (role === UserRole.ADMIN) {
+            const seedAdmin = async () => {
+                try {
+                    const usersRef = collection(db, 'users');
+                    const q = query(usersRef, where('role', '==', 'admin'));
+                    const snap = await getDocs(q);
+                    if (snap.empty) {
+                        await addDoc(usersRef, {
+                            name: 'Super Admin',
+                            phone: '0000000000',
+                            email: 'admin@rentease.com',
+                            role: 'admin',
+                            userId: 'U-ADMIN1234',
+                            systemId: 'admin',
+                            password: 'admin',
+                            createdAt: new Date().toISOString()
+                        });
+                        console.log("Admin seeded successfully: 'admin' / 'admin'");
+                    }
+                } catch (e) {
+                    console.error("Failed to seed admin:", e);
+                }
+            };
+            seedAdmin();
+        }
+    }, [role]);
 
     // ── Login ─────────────────────────────────────────────────────────────────
     const handleLogin = async (e: React.FormEvent) => {
@@ -101,7 +134,11 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
             }
 
             // Role check
-            const userRole = foundUser.role === 'owner' ? UserRole.OWNER : UserRole.TENANT;
+            let userRole: UserRole;
+            if (foundUser.role === 'admin') userRole = UserRole.ADMIN;
+            else if (foundUser.role === 'owner') userRole = UserRole.OWNER;
+            else userRole = UserRole.TENANT;
+
             if (userRole !== role) {
                 setError(`This account is registered as a ${foundUser.role}. Please select the correct role.`);
                 setLoading(false);
@@ -171,7 +208,7 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                 name,
                 phone,
                 email: email || null,
-                role: role === UserRole.OWNER ? 'owner' : 'tenant',
+                role: role === UserRole.OWNER ? 'owner' : role === UserRole.ADMIN ? 'admin' : 'tenant',
                 userId,
                 systemId,
                 password: regPassword,
@@ -191,7 +228,7 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                 systemId,
                 name: userData.name,
                 phone: userData.phone,
-                role: userData.role === 'owner' ? UserRole.OWNER : UserRole.TENANT,
+                role: userData.role === 'owner' ? UserRole.OWNER : userData.role === 'admin' ? UserRole.ADMIN : UserRole.TENANT,
                 email: userData.email || undefined
             };
 
@@ -224,12 +261,14 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                             <Icons.Home />
                         </div>
                         <h2 className="text-3xl font-bold text-[#2D3436]">
-                            {mode === 'login' ? 'Welcome Back' : 'Create Account'}
+                            {role === UserRole.ADMIN ? 'Admin Login' : (mode === 'login' ? 'Welcome Back' : 'Create Account')}
                         </h2>
                         <p className="text-[#8E9491] mt-2">
-                            {mode === 'login'
-                                ? 'Enter your System ID or Phone + Password'
-                                : 'Join us to manage your properties easily'}
+                            {role === UserRole.ADMIN
+                                ? 'Enter your Admin ID and password'
+                                : (mode === 'login'
+                                    ? 'Enter your System ID or Phone + Password'
+                                    : 'Join us to manage your properties easily')}
                         </p>
                     </div>
 
@@ -239,19 +278,21 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                         </div>
                     )}
 
-                    {/* Role selector – shown on both modes */}
-                    <div className="grid grid-cols-2 gap-3 mb-6">
-                        <label className={`cursor-pointer border-2 rounded-xl p-4 text-center transition-all ${role === UserRole.OWNER ? 'border-[#4B5EAA] bg-[#EEF2FF] text-[#4B5EAA]' : 'border-[#EAEAEA] hover:border-gray-300 text-gray-500'}`}>
-                            <input type="radio" className="hidden" name="role" checked={role === UserRole.OWNER} onChange={() => setRole(UserRole.OWNER)} />
-                            <div className="text-xl mb-1">🏠</div>
-                            <div className="font-bold text-sm">Owner</div>
-                        </label>
-                        <label className={`cursor-pointer border-2 rounded-xl p-4 text-center transition-all ${role === UserRole.TENANT ? 'border-[#4B5EAA] bg-[#EEF2FF] text-[#4B5EAA]' : 'border-[#EAEAEA] hover:border-gray-300 text-gray-500'}`}>
-                            <input type="radio" className="hidden" name="role" checked={role === UserRole.TENANT} onChange={() => setRole(UserRole.TENANT)} />
-                            <div className="text-xl mb-1">🔑</div>
-                            <div className="font-bold text-sm">Tenant</div>
-                        </label>
-                    </div>
+                    {/* Role selector – shown on both modes for regular users, hidden for admin */}
+                    {role !== UserRole.ADMIN && (
+                        <div className="grid grid-cols-2 gap-3 mb-6">
+                            <label className={`cursor-pointer border-2 rounded-xl p-4 text-center transition-all ${role === UserRole.OWNER ? 'border-[#4B5EAA] bg-[#EEF2FF] text-[#4B5EAA]' : 'border-[#EAEAEA] hover:border-gray-300 text-gray-500'}`}>
+                                <input type="radio" className="hidden" name="role" checked={role === UserRole.OWNER} onChange={() => setRole(UserRole.OWNER)} />
+                                <div className="text-xl mb-1">🏠</div>
+                                <div className="font-bold text-sm">Owner</div>
+                            </label>
+                            <label className={`cursor-pointer border-2 rounded-xl p-4 text-center transition-all ${role === UserRole.TENANT ? 'border-[#4B5EAA] bg-[#EEF2FF] text-[#4B5EAA]' : 'border-[#EAEAEA] hover:border-gray-300 text-gray-500'}`}>
+                                <input type="radio" className="hidden" name="role" checked={role === UserRole.TENANT} onChange={() => setRole(UserRole.TENANT)} />
+                                <div className="text-xl mb-1">🔑</div>
+                                <div className="font-bold text-sm">Tenant</div>
+                            </label>
+                        </div>
+                    )}
 
                     {mode === 'login' ? (
                         <form onSubmit={handleLogin} className="space-y-5">
@@ -260,7 +301,7 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                                 <input
                                     type="text"
                                     className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9] font-mono"
-                                    placeholder={role === UserRole.OWNER ? 'RE-OWN-4821 or 9876543210' : 'RE-TEN-1923 or 9876543210'}
+                                    placeholder={role === UserRole.ADMIN ? 'admin or RE-ADM-XXXX' : (role === UserRole.OWNER ? 'RE-OWN-XXXX or Phone' : 'RE-TEN-XXXX or Phone')}
                                     value={identifier}
                                     onChange={(e) => setIdentifier(e.target.value)}
                                     required
@@ -371,18 +412,20 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                         </form>
                     )}
 
-                    <div className="mt-8 text-center border-t border-[#EAEAEA] pt-6">
-                        <p className="text-[#8E9491]">
-                            {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
-                            <button
-                                type="button"
-                                onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}
-                                className="font-bold text-[#4B5EAA] hover:underline"
-                            >
-                                {mode === 'login' ? 'Create Account' : 'Login here'}
-                            </button>
-                        </p>
-                    </div>
+                    {role !== UserRole.ADMIN && (
+                        <div className="mt-8 text-center border-t border-[#EAEAEA] pt-6">
+                            <p className="text-[#8E9491]">
+                                {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
+                                <button
+                                    type="button"
+                                    onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}
+                                    className="font-bold text-[#4B5EAA] hover:underline"
+                                >
+                                    {mode === 'login' ? 'Create Account' : 'Login here'}
+                                </button>
+                            </p>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

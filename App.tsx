@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, UserRole, Property, Payment, Complaint, PaymentStatus, ComplaintStatus } from './types';
 import OwnerPanel from './components/OwnerPanel';
 import TenantPanel from './components/TenantPanel';
+import AdminPanel from './components/AdminPanel';
 import LandingPage from './components/LandingPage';
 import Auth from './components/Auth';
 import { Language } from './translations';
@@ -10,14 +11,18 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 const AppContent: React.FC = () => {
   const { currentUser, login, logout } = useAuth();
   const [lang, setLang] = useState<Language>('en');
-  const [view, setView] = useState<'landing' | 'owner' | 'tenant' | 'auth'>('landing');
+  const [view, setView] = useState<'landing' | 'owner' | 'tenant' | 'admin' | 'auth'>('landing');
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authRole, setAuthRole] = useState<UserRole>(UserRole.TENANT);
 
   // Set View based on Role
   useEffect(() => {
     if (currentUser) {
-      setView(currentUser.role === UserRole.OWNER ? 'owner' : 'tenant');
+      if (currentUser.role === UserRole.ADMIN) {
+        setView('admin');
+      } else {
+        setView(currentUser.role === UserRole.OWNER ? 'owner' : 'tenant');
+      }
     } else {
       setView('landing');
     }
@@ -52,6 +57,7 @@ const AppContent: React.FC = () => {
           setLang={setLang}
           onLoginOwner={() => navigateToAuth(UserRole.OWNER, 'login')}
           onLoginTenant={() => navigateToAuth(UserRole.TENANT, 'login')}
+          onLoginAdmin={() => navigateToAuth(UserRole.ADMIN, 'login')}
         />
       )}
       {view === 'auth' && (
@@ -71,6 +77,13 @@ const AppContent: React.FC = () => {
       )}
       {view === 'tenant' && currentUser && (
         <TenantPanel
+          user={currentUser}
+          lang={lang}
+          onLogout={handleLogout}
+        />
+      )}
+      {view === 'admin' && currentUser && (
+        <AdminPanel
           user={currentUser}
           lang={lang}
           onLogout={handleLogout}
