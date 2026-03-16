@@ -68,6 +68,15 @@ export interface Property {
   propertyType: PropertyType;
   availabilityStatus: 'available' | 'rented';
   createdAt: string;
+  // Admin review fields
+  status?: 'pending' | 'approved' | 'rejected' | 'under_review';
+  submittedAt?: string;
+  approvedAt?: string;
+  rejectedAt?: string;
+  approvedBy?: string;
+  rejectionReason?: string;
+  verificationNotes?: string;
+  isVisibleToTenants?: boolean;
   // Legacy fields
   name?: string;
   address?: string;

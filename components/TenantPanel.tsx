@@ -76,7 +76,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   useEffect(() => {
     const q = query(collection(db, 'properties'), where('availabilityStatus', '==', 'available'));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const propsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property));
+      const propsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property)).filter(p => p.status === 'approved' || p.isVisibleToTenants === true || (!p.status && p.isVisibleToTenants === undefined));
       setAllProperties(propsData);
       setLoading(false);
 

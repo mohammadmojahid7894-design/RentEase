@@ -438,6 +438,9 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         propertyType: newProperty.propertyType,
         availabilityStatus: newProperty.availabilityStatus,
         floorsCount: Number(newProperty.floorsCount) || 1,
+        status: 'pending',
+        submittedAt: new Date().toISOString(),
+        isVisibleToTenants: false,
         createdAt: new Date().toISOString()
       };
       const docRef = await addDoc(collection(db, 'properties'), propData);
@@ -465,7 +468,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         availabilityStatus: 'available',
         floorsCount: '1'
       });
-      alert('Property added successfully!');
+      alert('Your property has been submitted for admin verification.');
     } catch (err) {
       console.error(err);
       alert('Failed to add property');
@@ -961,10 +964,15 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                     <div className="p-5 flex flex-col flex-1">
                       <div className="flex justify-between items-start mb-4">
                         <div>
-                          <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide mb-2 inline-block ${p.availabilityStatus === 'available' ? 'bg-[#E8F5E9] text-[#2E7D32]' : 'bg-[#FFF8E1] text-[#F57F17]'}`}>
-                            {p.availabilityStatus}
+                          <span className={`px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide mb-2 inline-block ${p.status === 'approved' ? 'bg-[#E8F5E9] text-[#2E7D32]' : p.status === 'rejected' ? 'bg-[#FFEBEE] text-[#C62828]' : 'bg-[#FFF8E1] text-[#F57F17]'}`}>
+                            {p.status === 'approved' ? 'Approved' : p.status === 'rejected' ? 'Rejected' : 'Pending Approval'}
                           </span>
                           <h4 className="text-lg font-bold text-[#2D3436]">{p.propertyTitle}</h4>
+                          {p.status === 'rejected' && p.rejectionReason && (
+                            <p className="text-xs text-red-600 bg-red-50 p-2 rounded mt-1 border border-red-100">
+                              <span className="font-bold">Reason:</span> {p.rejectionReason}
+                            </p>
+                          )}
                           <p className="text-sm text-[#8E9491] flex items-center gap-1 mt-1">
                             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="m9.69 18.933.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 0 0 .281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 1 0 3 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 0 0 2.273 1.765 11.842 11.842 0 0 0 .976.536l.034.017Zm.31-10.433a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z" clipRule="evenodd" /></svg>
                             {p.location}

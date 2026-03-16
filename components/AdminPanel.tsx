@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
 import { User, Property, InterestRequest } from '../types';
 import { Icons } from '../constants';
 import { Language } from '../translations';
@@ -19,6 +19,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
   const [users, setUsers] = useState<any[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
+
+  // Property Filters
+  const [propertyFilter, setPropertyFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
+  const [propertySearchToken, setPropertySearchToken] = useState('');
 
   const fetchData = async () => {
     setLoading(true);
@@ -45,6 +49,48 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
   const tenants = users.filter((u) => u.role === 'tenant' || u.role === 'TENANT');
   const occupiedProps = properties.filter(p => p.availabilityStatus === 'rented' || p.isOccupied === true);
   const vacantProps = properties.filter(p => p.availabilityStatus === 'available' || p.isOccupied === false);
+  const pendingProps = properties.filter(p => p.status === 'pending');
+  const approvedProps = properties.filter(p => p.status === 'approved' || (!p.status && p.isVisibleToTenants !== false));
+  const rejectedProps = properties.filter(p => p.status === 'rejected');
+
+  const handleApproveProperty = async (id: string) => {
+    if (window.confirm("Approve this property? It will be visible to tenants.")) {
+      try {
+        await updateDoc(doc(db, 'properties', id), {
+          status: 'approved',
+          approvedAt: new Date().toISOString(),
+          approvedBy: user.id,
+          isVisibleToTenants: true
+        });
+        setProperties(properties.map(p => p.id === id ? { ...p, status: 'approved', isVisibleToTenants: true } : p));
+      } catch (err) {
+         console.error(err);
+         alert("Failed to approve property.");
+      }
+    }
+  };
+
+  const handleRejectProperty = async (id: string) => {
+    const reason = window.prompt("Reason for rejection:");
+    if (reason !== null) {
+      if (reason.trim() === '') {
+        alert("Rejection reason cannot be empty.");
+        return;
+      }
+      try {
+        await updateDoc(doc(db, 'properties', id), {
+          status: 'rejected',
+          rejectedAt: new Date().toISOString(),
+          rejectionReason: reason,
+          isVisibleToTenants: false
+        });
+        setProperties(properties.map(p => p.id === id ? { ...p, status: 'rejected', rejectionReason: reason, isVisibleToTenants: false } : p));
+      } catch (err) {
+         console.error(err);
+         alert("Failed to reject property.");
+      }
+    }
+  };
 
   const handleDeleteUser = async (id: string) => {
     if (window.confirm("Are you sure you want to delete this user?")) {
@@ -90,10 +136,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
         {[
           { title: "Total Users", val: users.length, icon: <Icons.Users />, color: "bg-blue-500" },
           { title: "Owners", val: owners.length, icon: <Icons.Home />, color: "bg-indigo-500" },
-          { title: "Tenants", val: tenants.length, icon: <Icons.Users />, color: "bg-cyan-500" },
-          { title: "Total Properties", val: properties.length, icon: <Icons.Rent />, color: "bg-purple-500" },
-          { title: "Occupied Prop.", val: occupiedProps.length, icon: <Icons.Home />, color: "bg-green-500" },
-          { title: "Vacant Prop.", val: vacantProps.length, icon: <Icons.Home />, color: "bg-yellow-500" },
+          { title: "Pending Prop.", val: pendingProps.length, icon: <Icons.Docs />, color: "bg-orange-500" },
+          { title: "Approved Prop.", val: approvedProps.length, icon: <Icons.Home />, color: "bg-green-500" },
+          { title: "Rejected Prop.", val: rejectedProps.length, icon: <Icons.Docs />, color: "bg-red-500" },
           { title: "Requests", val: requests.length, icon: <Icons.Docs />, color: "bg-pink-500" },
         ].map((stat, i) => (
           <div key={i} className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 hover:shadow-2xl transition-all hover:-translate-y-1 relative overflow-hidden group">
@@ -148,44 +193,108 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
     </div>
   );
 
-  const renderPropertiesTable = () => (
-    <div className="animate-fadeIn">
-      <h2 className="text-3xl font-extrabold text-gray-800 mb-6 drop-shadow-sm">Manage Properties</h2>
-      <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 overflow-x-auto">
-        <table className="w-full text-left border-collapse">
-          <thead>
-            <tr className="border-b-2 border-gray-100 text-gray-500 uppercase tracking-wider text-sm">
-              <th className="py-4 px-4 font-bold">Title</th>
-              <th className="py-4 px-4 font-bold">Type</th>
-              <th className="py-4 px-4 font-bold">Rent</th>
-              <th className="py-4 px-4 font-bold">Status</th>
-              <th className="py-4 px-4 font-bold text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {properties.map(p => (
-              <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
-                <td className="py-4 px-4 font-bold text-gray-800">{p.propertyTitle || p.name || 'Untitled'}</td>
-                <td className="py-4 px-4 text-gray-600">{p.propertyType}</td>
-                <td className="py-4 px-4 text-gray-800 font-bold">₹{p.rentAmount}</td>
-                <td className="py-4 px-4">
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${p.availabilityStatus === 'available' || p.isOccupied === false ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                     {p.availabilityStatus === 'available' || p.isOccupied === false ? 'Vacant' : 'Occupied'}
-                  </span>
-                </td>
-                <td className="py-4 px-4 text-right">
-                  <button onClick={() => handleDeleteProperty(p.id)} className="text-red-500 hover:text-red-700 font-semibold hover:bg-red-50 px-3 py-1 rounded-lg transition-colors">Delete</button>
-                </td>
+  const renderPropertiesTable = () => {
+    const filteredProps = properties.filter(p => {
+      let statusMatch = true;
+      if (propertyFilter === 'pending') statusMatch = p.status === 'pending';
+      else if (propertyFilter === 'approved') statusMatch = p.status === 'approved' || (!p.status && p.isVisibleToTenants !== false);
+      else if (propertyFilter === 'rejected') statusMatch = p.status === 'rejected';
+
+      let searchMatch = true;
+      if (propertySearchToken.trim()) {
+        const token = propertySearchToken.toLowerCase();
+        const owner = users.find(u => u.id === p.ownerId || u.userId === p.ownerId);
+        const ownerName = owner?.name?.toLowerCase() || '';
+        searchMatch = (p.propertyTitle || '').toLowerCase().includes(token) || 
+                      (p.location || '').toLowerCase().includes(token) ||
+                      ownerName.includes(token);
+      }
+      return statusMatch && searchMatch;
+    });
+
+    return (
+      <div className="animate-fadeIn">
+        <h2 className="text-3xl font-extrabold text-gray-800 mb-6 drop-shadow-sm">Manage Properties</h2>
+        
+        {/* Filters and Search */}
+        <div className="flex flex-col md:flex-row justify-between mb-4 gap-4">
+          <div className="flex gap-2 bg-gray-100 p-1 rounded-lg w-full md:w-auto">
+             {['all', 'pending', 'approved', 'rejected'].map(f => (
+               <button 
+                 key={f} 
+                 onClick={() => setPropertyFilter(f as any)} 
+                 className={`px-4 py-2 text-sm font-semibold rounded-md capitalize transition-colors ${propertyFilter === f ? 'bg-white shadow text-indigo-600' : 'text-gray-500 hover:text-gray-800'}`}
+               >
+                 {f}
+               </button>
+             ))}
+          </div>
+          <input 
+             type="text" 
+             placeholder="Search by title, location, owner..." 
+             className="px-4 py-2 border border-gray-200 rounded-lg w-full md:w-72 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+             value={propertySearchToken}
+             onChange={(e) => setPropertySearchToken(e.target.value)}
+          />
+        </div>
+
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-max">
+            <thead>
+              <tr className="border-b-2 border-gray-100 text-gray-500 uppercase tracking-wider text-sm">
+                <th className="py-4 px-4 font-bold max-w-[200px]">Title & Location</th>
+                <th className="py-4 px-4 font-bold">Owner & Contact</th>
+                <th className="py-4 px-4 font-bold">Type/Rent</th>
+                <th className="py-4 px-4 font-bold">Status</th>
+                <th className="py-4 px-4 font-bold text-right">Actions</th>
               </tr>
-            ))}
-            {properties.length === 0 && (
-              <tr><td colSpan={5} className="py-8 text-center text-gray-500">No properties available.</td></tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {filteredProps.map(p => {
+                const owner = users.find(u => u.id === p.ownerId || u.userId === p.ownerId);
+                const derivedStatus = p.status || (p.isVisibleToTenants === false ? 'pending' : 'approved');
+
+                return (
+                <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                  <td className="py-4 px-4 max-w-[200px]">
+                    <p className="font-bold text-gray-800 truncate">{p.propertyTitle || p.name || 'Untitled'}</p>
+                    <p className="text-xs text-gray-500 truncate">{p.location || 'Unknown location'}</p>
+                  </td>
+                  <td className="py-4 px-4">
+                    <p className="font-bold text-gray-700">{owner?.name || 'Unknown'}</p>
+                    <p className="text-xs text-gray-500">{owner?.phone || 'No phone'}</p>
+                  </td>
+                  <td className="py-4 px-4">
+                    <p className="text-gray-600 text-xs font-semibold uppercase">{p.propertyType}</p>
+                    <p className="text-gray-800 font-bold">₹{p.rentAmount}</p>
+                  </td>
+                  <td className="py-4 px-4">
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${derivedStatus === 'approved' ? 'bg-green-100 text-green-700' : derivedStatus === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>
+                       {derivedStatus}
+                    </span>
+                    {derivedStatus === 'pending' && <p className="text-xs text-orange-500 mt-1 font-semibold">Needs Review</p>}
+                  </td>
+                  <td className="py-4 px-4 text-right space-x-2">
+                    {derivedStatus === 'pending' && (
+                      <div className="flex justify-end gap-2 mb-2">
+                        <button onClick={() => handleApproveProperty(p.id)} className="bg-green-500 hover:bg-green-600 text-white font-semibold px-3 py-1 rounded-lg transition-colors text-xs whitespace-nowrap">Approve</button>
+                        <button onClick={() => handleRejectProperty(p.id)} className="bg-orange-500 hover:bg-orange-600 text-white font-semibold px-3 py-1 rounded-lg transition-colors text-xs whitespace-nowrap">Reject</button>
+                      </div>
+                    )}
+                    <button onClick={() => handleDeleteProperty(p.id)} className="text-red-500 hover:text-red-700 font-semibold hover:bg-red-50 px-3 py-1 rounded-lg transition-colors text-xs whitespace-nowrap">Delete</button>
+                  </td>
+                </tr>
+                );
+              })}
+              {filteredProps.length === 0 && (
+                <tr><td colSpan={5} className="py-8 text-center text-gray-500">No properties found.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderRequestsTable = () => (
     <div className="animate-fadeIn">
