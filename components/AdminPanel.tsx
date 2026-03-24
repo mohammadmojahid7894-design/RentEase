@@ -244,7 +244,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
               <tr className="border-b-2 border-gray-100 text-gray-500 uppercase tracking-wider text-sm">
                 <th className="py-4 px-4 font-bold max-w-[200px]">Title & Location</th>
                 <th className="py-4 px-4 font-bold">Owner & Contact</th>
-                <th className="py-4 px-4 font-bold">Type/Rent</th>
+                <th className="py-4 px-4 font-bold">Type/Units</th>
                 <th className="py-4 px-4 font-bold">Status</th>
                 <th className="py-4 px-4 font-bold text-right">Actions</th>
               </tr>
@@ -266,7 +266,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
                   </td>
                   <td className="py-4 px-4">
                     <p className="text-gray-600 text-xs font-semibold uppercase">{p.propertyType}</p>
-                    <p className="text-gray-800 font-bold">₹{p.rentAmount}</p>
+                    <p className="text-gray-800 font-bold">{p.units?.length || 0} Units</p>
                   </td>
                   <td className="py-4 px-4">
                     <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${derivedStatus === 'approved' ? 'bg-green-100 text-green-700' : derivedStatus === 'rejected' ? 'bg-red-100 text-red-700' : 'bg-orange-100 text-orange-700'}`}>

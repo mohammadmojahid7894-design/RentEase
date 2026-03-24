@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { User, Property, InterestRequest, PropertyType, PropertyFloor, RentNotice, RentPaymentRecord, AppNotification, Complaint, ComplaintStatus, ComplaintPriority, RentRecord } from '../types';
+import { User, Property, InterestRequest, PropertyType, PropertyUnit, RentNotice, RentPaymentRecord, AppNotification, Complaint, ComplaintStatus, ComplaintPriority, RentRecord } from '../types';
 import { db, storage } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot, orderBy, deleteDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -24,8 +24,8 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   const [tenants, setTenants] = useState<Record<string, User>>({}); // tenantId -> User
   const [manualTenants, setManualTenants] = useState<Record<string, any>>({}); // tenantId -> ManualTenant
 
-  const [ownerStats, setOwnerStats] = useState({ totalProperties: 0, totalFloors: 0, occupied: 0, vacant: 0, totalMonthlyRentConfigured: 0 });
-  const [propertyStats, setPropertyStats] = useState<Record<string, { totalFloors: number, occupied: number, vacant: number }>>({});
+  const [ownerStats, setOwnerStats] = useState({ totalProperties: 0, totalUnits: 0, occupied: 0, vacant: 0, totalMonthlyRentConfigured: 0 });
+  const [propertyStats, setPropertyStats] = useState<Record<string, { totalUnits: number, occupied: number, vacant: number }>>({});
 
   const [loading, setLoading] = useState(true);
   const [isPropertyModalOpen, setIsPropertyModalOpen] = useState(false);
@@ -45,7 +45,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     description: '',
     propertyType: PropertyType.FLAT,
     availabilityStatus: 'available',
-    floorsCount: '1'
+    units: [{ unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] as PropertyUnit[]
   });
   const [addingProperty, setAddingProperty] = useState(false);
 
@@ -59,24 +59,24 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     moveInDate: ''
   });
 
-  const [selectedFloorForManual, setSelectedFloorForManual] = useState<PropertyFloor | null>(null);
+  const [selectedUnitForManual, setSelectedUnitForManual] = useState<PropertyUnit | null>(null);
   const [submittingManualTenant, setSubmittingManualTenant] = useState(false);
 
-  // Edit Floor State
-  const [isEditFloorModalOpen, setIsEditFloorModalOpen] = useState(false);
-  const [editingFloor, setEditingFloor] = useState<PropertyFloor | null>(null);
-  const [editFloorData, setEditFloorData] = useState({ rentAmount: '', securityDeposit: '' });
+  // Edit Unit State
+  const [isEditUnitModalOpen, setIsEditUnitModalOpen] = useState(false);
+  const [editingUnit, setEditingUnit] = useState<PropertyUnit | null>(null);
+  const [editUnitData, setEditUnitData] = useState({ unitName: '', roomSize: '', rentAmount: '' });
 
-  // Floors Management State
-  const [selectedPropertyForFloors, setSelectedPropertyForFloors] = useState<Property | null>(null);
-  const [propertyFloors, setPropertyFloors] = useState<PropertyFloor[]>([]);
-  const [floorsLoading, setFloorsLoading] = useState(false);
+  // Units Management State
+  const [selectedPropertyForUnits, setSelectedPropertyForUnits] = useState<Property | null>(null);
+  const [propertyUnits, setPropertyUnits] = useState<PropertyUnit[]>([]);
+  const [unitsLoading, setUnitsLoading] = useState(false);
 
-  // Assign Floor State
-  const [isAssignFloorModalOpen, setIsAssignFloorModalOpen] = useState(false);
+  // Assign Unit State
+  const [isAssignUnitModalOpen, setIsAssignUnitModalOpen] = useState(false);
   const [requestToAssign, setRequestToAssign] = useState<InterestRequest | null>(null);
-  const [availableFloorsForAssignment, setAvailableFloorsForAssignment] = useState<PropertyFloor[]>([]);
-  const [selectedApproveFloorId, setSelectedApproveFloorId] = useState<string>('');
+  const [availableUnitsForAssignment, setAvailableUnitsForAssignment] = useState<PropertyUnit[]>([]);
+  const [selectedApproveUnitId, setSelectedApproveUnitId] = useState<string>('');
 
   // ── Notices State ─────────────────────────────────────────────────────────
   const [notices, setNotices] = useState<RentNotice[]>([]);
@@ -126,30 +126,30 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
       setLoading(false);
 
       // Compute stats
-      let tFloors = 0;
+      let tUnits = 0;
       let occ = 0;
-      const pStats: Record<string, { totalFloors: number, occupied: number, vacant: number }> = {};
+      const pStats: Record<string, { totalUnits: number, occupied: number, vacant: number }> = {};
       let tRent = 0;
       for (const p of sortedProps) {
-        const uSnap = await getDocs(query(collection(db, `properties/${p.id}/floors`)));
-        const pTotal = uSnap.docs.length;
+        const units = p.units || [];
+        const pTotal = units.length;
         let pOcc = 0;
-        uSnap.forEach(d => {
-          if (d.data().status === 'occupied') { 
+        units.forEach(u => {
+          if (u.status === 'occupied') { 
              occ++; 
              pOcc++; 
-             tRent += Number(d.data().rentPrice) || 0;
+             tRent += Number(u.rentAmount) || 0;
           }
         });
-        tFloors += pTotal;
-        pStats[p.id] = { totalFloors: pTotal, occupied: pOcc, vacant: pTotal - pOcc };
+        tUnits += pTotal;
+        pStats[p.id] = { totalUnits: pTotal, occupied: pOcc, vacant: pTotal - pOcc };
       }
       setPropertyStats(pStats);
       setOwnerStats({
         totalProperties: sortedProps.length,
-        totalFloors: tFloors,
+        totalUnits: tUnits,
         occupied: occ,
-        vacant: tFloors - occ,
+        vacant: tUnits - occ,
         totalMonthlyRentConfigured: tRent
       });
     });
@@ -275,7 +275,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
 
   // Compute financial stats from actual payments and records
   useEffect(() => {
-    // Total Monthly Rent = Fixed Expectation computed from occupied floors
+    // Total Monthly Rent = Fixed Expectation computed from occupied units
     const totalMonthlyRent = ownerStats.totalMonthlyRentConfigured || 0;
     
     // Actually sum up real payments for "Total Paid" instead of only relying on rentRecords that are paid.
@@ -365,21 +365,24 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     return () => clearInterval(interval);
   }, [properties]);
 
-  // Fetch Floors when Manage Floors is open
+  // Fetch Units when Manage Units is open
   useEffect(() => {
-    if (!selectedPropertyForFloors) {
-      setPropertyFloors([]);
+    if (!selectedPropertyForUnits) {
+      setPropertyUnits([]);
       return;
     }
-    setFloorsLoading(true);
-    const q = query(collection(db, `properties/${selectedPropertyForFloors.id}/floors`));
+    setUnitsLoading(true);
+    
+    // Listen to changes on the selected property document itself
+    const q = doc(db, 'properties', selectedPropertyForUnits.id);
     const unsub = onSnapshot(q, async (snap) => {
-      const fData = snap.docs.map(d => ({ id: d.id, ...d.data() } as PropertyFloor));
-      fData.sort((a, b) => a.floorNumber - b.floorNumber);
-      setPropertyFloors(fData);
+      if (!snap.exists()) return;
+      const propData = snap.data() as Property;
+      const uData = propData.units || [];
+      setPropertyUnits(uData);
 
       // Check if there are any missing tenants
-      const missingTenantIds = fData.filter(u => u.status === 'occupied' && u.tenantId && !u.tenantId.startsWith('mt_') && !tenants[u.tenantId]).map(u => u.tenantId!);
+      const missingTenantIds = uData.filter(u => u.status === 'occupied' && u.tenantId && !u.tenantId.startsWith('mt_') && !tenants[u.tenantId]).map(u => u.tenantId!);
       if (missingTenantIds.length > 0) {
         const newTenants = { ...tenants };
         let updated = false;
@@ -406,7 +409,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
       }
 
       // Fetch manual tenants check
-      const missingManualTenantIds = fData.filter(u => u.status === 'occupied' && u.tenantId && u.tenantId.startsWith('mt_') && !manualTenants[u.tenantId]).map(u => u.tenantId!);
+      const missingManualTenantIds = uData.filter(u => u.status === 'occupied' && u.tenantId && u.tenantId.startsWith('mt_')).map(u => u.tenantId!);
       if (missingManualTenantIds.length > 0) {
         const newManuals = { ...manualTenants };
         let updated = false;
@@ -430,11 +433,11 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         }
         if (updated) setManualTenants(newManuals);
       }
-      setFloorsLoading(false);
+      setUnitsLoading(false);
     });
     return () => unsub();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPropertyForFloors]);
+  }, [selectedPropertyForUnits]);
 
   const handleAddPropertySubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -449,25 +452,13 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         description: newProperty.description,
         propertyType: newProperty.propertyType,
         availabilityStatus: newProperty.availabilityStatus,
-        floorsCount: Number(newProperty.floorsCount) || 1,
         status: 'pending',
         submittedAt: new Date().toISOString(),
         isVisibleToTenants: false,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        units: newProperty.units.map(u => ({ ...u, rentAmount: Number(u.rentAmount) }))
       };
-      const docRef = await addDoc(collection(db, 'properties'), propData);
-
-      const floorsCount = Number(newProperty.floorsCount) || 1;
-      for (let i = 1; i <= floorsCount; i++) {
-        await addDoc(collection(db, `properties/${docRef.id}/floors`), {
-          floorNumber: i,
-          status: 'vacant',
-          tenantId: '',
-          rentPrice: propData.rentAmount,
-          securityDeposit: propData.securityDeposit,
-          createdAt: new Date().toISOString()
-        });
-      }
+      await addDoc(collection(db, 'properties'), propData);
 
       setIsPropertyModalOpen(false);
       setNewProperty({
@@ -478,7 +469,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         description: '',
         propertyType: PropertyType.FLAT,
         availabilityStatus: 'available',
-        floorsCount: '1'
+        units: [{ unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] as PropertyUnit[]
       });
       alert('Your property has been submitted for admin verification.');
     } catch (err) {
@@ -494,12 +485,14 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     if (!confirm) return;
 
     try {
-      if (req.selectedFloors && req.selectedFloors.length > 0) {
-        for (const fId of req.selectedFloors) {
-          await updateDoc(doc(db, `properties/${req.propertyId}/floors`, fId), {
-            status: 'occupied',
-            tenantId: req.tenantId
-          });
+      if (req.selectedUnits && req.selectedUnits.length > 0) {
+        const propRef = doc(db, 'properties', req.propertyId);
+        const prop = properties.find(p => p.id === req.propertyId);
+        if (prop) {
+            const updatedUnits = prop.units?.map(u => 
+                req.selectedUnits?.includes(u.unitId) ? { ...u, status: 'occupied' as const, tenantId: req.tenantId } : u
+            ) || [];
+            await updateDoc(propRef, { units: updatedUnits });
         }
       }
 
@@ -508,7 +501,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         status: 'approved',
       });
 
-      alert('Request approved! Floors assigned.');
+      alert('Request approved! Units assigned.');
       setRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'approved' } : r));
     } catch (err) {
       console.error(err);
@@ -527,41 +520,39 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     }
   };
 
-  const handleMarkVacant = async (floor: PropertyFloor) => {
-    if (!selectedPropertyForFloors) return;
-    const confirm = window.confirm(`Are you sure you want to mark Floor ${floor.floorNumber} as vacant?`);
+  const handleMarkVacant = async (unit: PropertyUnit) => {
+    if (!selectedPropertyForUnits) return;
+    const confirm = window.confirm(`Are you sure you want to mark ${unit.unitName} as vacant?`);
     if (!confirm) return;
     try {
-      await updateDoc(doc(db, `properties/${selectedPropertyForFloors.id}/floors`, floor.id), {
-        status: 'vacant',
-        tenantId: ''
-      });
-      alert(`Floor ${floor.floorNumber} is now vacant.`);
+      const updatedUnits = selectedPropertyForUnits.units?.map(u => u.unitId === unit.unitId ? { ...u, status: 'vacant' as const, tenantId: '' } : u) || [];
+      await updateDoc(doc(db, 'properties', selectedPropertyForUnits.id), { units: updatedUnits });
+      alert(`${unit.unitName} is now vacant.`);
     } catch (e) {
       console.error(e);
-      alert("Error marking floor vacant");
+      alert("Error marking unit vacant");
     }
   };
 
-  const handleEditFloorSubmit = async (e: React.FormEvent) => {
+  const handleEditUnitSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPropertyForFloors || !editingFloor) return;
+    if (!selectedPropertyForUnits || !editingUnit) return;
     try {
-      await updateDoc(doc(db, `properties/${selectedPropertyForFloors.id}/floors`, editingFloor.id), {
-        rentPrice: Number(editFloorData.rentAmount),
-        securityDeposit: Number(editFloorData.securityDeposit) || 0
-      });
-      alert("Floor details updated!");
-      setIsEditFloorModalOpen(false);
-      setEditingFloor(null);
+      const updatedUnits = selectedPropertyForUnits.units?.map(u => 
+        u.unitId === editingUnit.unitId ? { ...u, unitName: editUnitData.unitName, roomSize: editUnitData.roomSize, rentAmount: Number(editUnitData.rentAmount) } : u
+      ) || [];
+      await updateDoc(doc(db, 'properties', selectedPropertyForUnits.id), { units: updatedUnits });
+      alert("Unit details updated!");
+      setIsEditUnitModalOpen(false);
+      setEditingUnit(null);
     } catch (e) {
-      alert("Error updating floor");
+      alert("Error updating unit");
     }
   };
 
   const handleManualTenantSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedPropertyForFloors || !selectedFloorForManual) return;
+    if (!selectedPropertyForUnits || !selectedUnitForManual) return;
     setSubmittingManualTenant(true);
 
     try {
@@ -575,18 +566,18 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         phone: manualTenantForm.phoneNumber,
         aadhaarNumber: manualTenantForm.aadhaarNumber,
 
-        propertyId: selectedPropertyForFloors.id,
-        floorId: selectedFloorForManual.id,
-        rentAmount: Number(manualTenantForm.rentAmount) || selectedFloorForManual.rentPrice,
+        propertyId: selectedPropertyForUnits.id,
+        unitId: selectedUnitForManual.unitId,
+        rentAmount: Number(manualTenantForm.rentAmount) || selectedUnitForManual.rentAmount,
         moveInDate: manualTenantForm.moveInDate,
         createdByOwner: user.id,
         createdAt: new Date().toISOString()
       };
 
-      await updateDoc(doc(db, `properties/${selectedPropertyForFloors.id}/floors`, selectedFloorForManual.id), {
-        status: 'occupied',
-        tenantId: tenantId
-      });
+      const updatedUnits = selectedPropertyForUnits.units?.map(u => 
+        u.unitId === selectedUnitForManual.unitId ? { ...u, status: 'occupied' as const, tenantId: tenantId } : u
+      ) || [];
+      await updateDoc(doc(db, 'properties', selectedPropertyForUnits.id), { units: updatedUnits });
 
       await addDoc(collection(db, 'tenants'), newTenantData);
 
@@ -595,7 +586,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
       setManualTenantForm({
         tenantName: '', phoneNumber: '', aadhaarNumber: '', rentAmount: '', moveInDate: ''
       });
-      setSelectedFloorForManual(null);
+      setSelectedUnitForManual(null);
     } catch (err) {
       console.error(err);
       alert("Failed to add tenant manually");
@@ -655,17 +646,12 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   // ── Delete Property ──────────────────────────────────────────────────────────
   const handleDeleteProperty = async (property: Property) => {
     const confirmed = window.confirm(
-      `Are you sure you want to delete "${property.propertyTitle}"?\n\nThis will permanently remove the property and all its floors. This action cannot be undone.`
+      `Are you sure you want to delete "${property.propertyTitle}"?\n\nThis will permanently remove the property and all its units. This action cannot be undone.`
     );
     if (!confirmed) return;
 
     try {
-      // First delete all floors sub-collection documents
-      const floorsSnap = await getDocs(collection(db, `properties/${property.id}/floors`));
-      const floorDeletes = floorsSnap.docs.map(floorDoc => deleteDoc(doc(db, `properties/${property.id}/floors`, floorDoc.id)));
-      await Promise.all(floorDeletes);
-
-      // Then delete the property document itself
+      // Delete the property document itself
       await deleteDoc(doc(db, 'properties', property.id));
 
       alert(`Property "${property.propertyTitle}" has been deleted successfully.`);
@@ -981,11 +967,11 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                 <p className="text-2xl font-bold text-[#4B5EAA]">{ownerStats.totalProperties}</p>
               </div>
               <div className="bg-white p-4 rounded-xl shadow-sm border border-[#EAEAEA] text-center">
-                <p className="text-gray-500 text-sm font-semibold uppercase">Total Floors</p>
-                <p className="text-2xl font-bold text-gray-800">{ownerStats.totalFloors}</p>
+                <p className="text-gray-500 text-sm font-semibold uppercase">Total Units</p>
+                <p className="text-2xl font-bold text-gray-800">{ownerStats.totalUnits}</p>
               </div>
               <div className="bg-white p-4 rounded-xl shadow-sm border border-[#EAEAEA] text-center border-b-4 border-green-500">
-                <p className="text-gray-500 text-sm font-semibold uppercase">Occupied Floors</p>
+                <p className="text-gray-500 text-sm font-semibold uppercase">Occupied Units</p>
                 <p className="text-2xl font-bold text-green-600">{ownerStats.occupied}</p>
               </div>
               <div className="bg-white p-4 rounded-xl shadow-sm border border-[#EAEAEA] text-center border-b-4 border-yellow-500">
@@ -1036,13 +1022,13 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
 
                       <div className="flex justify-between items-center text-sm font-medium text-gray-500 border-t border-[#EAEAEA] pt-4 mt-auto">
                         <div className="flex flex-col">
-                          <span className="text-[#2D3436] font-bold flex items-center gap-1"><Icons.Home /> {propertyStats[p.id]?.totalFloors || p.floorsCount || 1} Total Floors</span>
+                          <span className="text-[#2D3436] font-bold flex items-center gap-1"><Icons.Home /> {propertyStats[p.id]?.totalUnits || p.units?.length || 1} Total Units</span>
                           {propertyStats[p.id] && (
                             <span className="text-xs mt-1"><span className="text-green-600 font-bold">{propertyStats[p.id].occupied} Occupied</span> | <span className="text-yellow-600 font-bold">{propertyStats[p.id].vacant} Vacant</span></span>
                           )}
                         </div>
                         <div className="flex items-center gap-2">
-                          <Button variant="outline" className="!py-1 !px-3 !text-xs !bg-[#E3F2FD] !border-[#BBDEFB] !text-[#1565C0] font-semibold h-fit" onClick={() => setSelectedPropertyForFloors(p)}>Manage Floors</Button>
+                          <Button variant="outline" className="!py-1 !px-3 !text-xs !bg-[#E3F2FD] !border-[#BBDEFB] !text-[#1565C0] font-semibold h-fit" onClick={() => setSelectedPropertyForUnits(p)}>Manage Units</Button>
                           <button
                             onClick={() => handleDeleteProperty(p)}
                             title="Delete Property"
@@ -1108,7 +1094,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                       </div>
 
                       <div className="flex flex-col gap-3 w-full md:w-auto">
-                        <span className="text-lg font-bold text-[#4B5EAA] text-right">Requested Floors: {req.selectedFloors ? req.selectedFloors.map(fid => fid.substring(0, 4)).join(', ') : 'Any'}</span>
+                        <span className="text-lg font-bold text-[#4B5EAA] text-right">Requested Units: {req.selectedUnits ? req.selectedUnits.map(uid => uid.substring(0, 10)).join(', ') : 'Any'}</span>
                         {req.totalRent && <span className="text-lg font-bold text-gray-700 text-right">Total Rent: ₹{req.totalRent}</span>}
                         {req.status === 'pending' && (
                           <div className="flex gap-2">
@@ -1235,8 +1221,8 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                 <p className="text-3xl font-bold text-[#4B5EAA]">{ownerStats.totalProperties}</p>
               </div>
               <div className="bg-white p-5 rounded-2xl border border-[#EAEAEA] shadow-sm text-center border-t-4 border-t-gray-400">
-                <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">Total Floors</p>
-                <p className="text-3xl font-bold text-gray-700">{ownerStats.totalFloors}</p>
+                <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">Total Units</p>
+                <p className="text-3xl font-bold text-gray-700">{ownerStats.totalUnits}</p>
               </div>
               <div className="bg-white p-5 rounded-2xl border border-[#EAEAEA] shadow-sm text-center border-t-4 border-t-green-500">
                 <p className="text-xs text-gray-400 font-semibold uppercase tracking-wider mb-1">Occupied</p>
@@ -1253,7 +1239,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <div className="bg-gradient-to-br from-[#4B5EAA] to-[#3D4D9A] p-5 rounded-2xl text-white shadow-md">
                 <p className="text-xs font-semibold uppercase tracking-wider opacity-80 mb-1">Total Monthly Rent</p>
                 <p className="text-3xl font-bold">₹{financialStats.totalMonthlyRent.toLocaleString('en-IN')}</p>
-                <p className="text-xs opacity-60 mt-1">Expected based on occupied floors</p>
+                <p className="text-xs opacity-60 mt-1">Expected based on occupied units</p>
               </div>
               <div className="bg-gradient-to-br from-green-500 to-green-600 p-5 rounded-2xl text-white shadow-md">
                 <p className="text-xs font-semibold uppercase tracking-wider opacity-80 mb-1">Total Paid</p>
@@ -1438,16 +1424,10 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Description</label>
               <textarea required rows={3} value={newProperty.description} onChange={e => setNewProperty({ ...newProperty, description: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="Beautiful flat with park view..."></textarea>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-[#2D3436] mb-1">Rent Amount (₹) per Floor</label>
-                <input required type="number" value={newProperty.rentAmount} onChange={e => setNewProperty({ ...newProperty, rentAmount: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="15000" />
-              </div>
               <div>
                 <label className="block text-sm font-medium text-[#2D3436] mb-1">Security Deposit (₹) <span className="text-gray-400 font-normal">(Optional)</span></label>
                 <input type="number" value={newProperty.securityDeposit} onChange={e => setNewProperty({ ...newProperty, securityDeposit: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="30000" />
               </div>
-            </div>
             <div>
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Property Type</label>
               <select value={newProperty.propertyType} onChange={e => setNewProperty({ ...newProperty, propertyType: e.target.value as PropertyType })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]">
@@ -1456,7 +1436,6 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                 ))}
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-4 mt-4">
               <div>
                 <label className="block text-sm font-medium text-[#2D3436] mb-1">Status</label>
                 <select value={newProperty.availabilityStatus} onChange={e => setNewProperty({ ...newProperty, availabilityStatus: e.target.value as 'available' | 'rented' })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]">
@@ -1464,9 +1443,37 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                   <option value="rented">Rented</option>
                 </select>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-[#2D3436] mb-1">Number of Floors</label>
-                <input required type="number" min="1" value={newProperty.floorsCount} onChange={e => setNewProperty({ ...newProperty, floorsCount: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="e.g. 3" />
+            
+            <div className="border border-[#EAEAEA] rounded-xl p-4 bg-gray-50 mt-4">
+              <div className="flex justify-between items-center mb-4">
+                <label className="block text-sm font-medium text-[#2D3436]">Units / Flats</label>
+                <Button type="button" variant="outline" className="!text-xs !px-2 !py-1" onClick={() => setNewProperty({ ...newProperty, units: [...newProperty.units, { unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] })}>+ Add Unit</Button>
+              </div>
+              <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                {newProperty.units.map((unit, index) => (
+                  <div key={unit.unitId} className="flex gap-2 items-center bg-white p-3 rounded-lg border border-[#EAEAEA]">
+                    <input className="flex-1 w-full p-2 border border-[#EAEAEA] rounded text-sm" placeholder="Unit Name (e.g. 101)" value={unit.unitName} onChange={e => {
+                      const newUnits = [...newProperty.units];
+                      newUnits[index].unitName = e.target.value;
+                      setNewProperty({ ...newProperty, units: newUnits });
+                    }} required />
+                    <input className="w-24 p-2 border border-[#EAEAEA] rounded text-sm" placeholder="1BHK / Size" value={unit.roomSize} onChange={e => {
+                      const newUnits = [...newProperty.units];
+                      newUnits[index].roomSize = e.target.value;
+                      setNewProperty({ ...newProperty, units: newUnits });
+                    }} required />
+                    <input className="w-28 p-2 border border-[#EAEAEA] rounded text-sm" type="number" placeholder="Rent (₹)" value={unit.rentAmount || ''} onChange={e => {
+                      const newUnits = [...newProperty.units];
+                      newUnits[index].rentAmount = Number(e.target.value);
+                      setNewProperty({ ...newProperty, units: newUnits });
+                    }} required />
+                    {newProperty.units.length > 1 && (
+                      <button type="button" className="text-red-500 font-bold px-2 hover:bg-red-50 rounded" onClick={() => {
+                        setNewProperty({ ...newProperty, units: newProperty.units.filter((_, i) => i !== index) });
+                      }}>×</button>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
             <div className="flex gap-3 mt-6">
@@ -1476,25 +1483,25 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
           </form>
         </Modal>
 
-        {/* Manage Floors Modal */}
-        <Modal isOpen={!!selectedPropertyForFloors} onClose={() => setSelectedPropertyForFloors(null)} title={`Manage Floors: ${selectedPropertyForFloors?.propertyTitle}`}>
-          {floorsLoading ? <div className="p-4 text-center">Loading floors...</div> : (
+        {/* Manage Units Modal */}
+        <Modal isOpen={!!selectedPropertyForUnits} onClose={() => setSelectedPropertyForUnits(null)} title={`Manage Units: ${selectedPropertyForUnits?.propertyTitle}`}>
+          {unitsLoading ? <div className="p-4 text-center">Loading units...</div> : (
             <div className="space-y-3">
-              {propertyFloors.length === 0 ? (
-                <p className="text-gray-500 italic p-4 text-center bg-gray-50 rounded-xl">No floors found for this property.</p>
+              {propertyUnits.length === 0 ? (
+                <p className="text-gray-500 italic p-4 text-center bg-gray-50 rounded-xl">No units found for this property.</p>
               ) : (
-                propertyFloors.map(floor => {
-                  const tId = floor.tenantId;
+                propertyUnits.map(unit => {
+                  const tId = unit.tenantId;
                   const isManual = tId && tId.startsWith('mt_');
                   const tenant = isManual ? manualTenants[tId] : tId ? tenants[tId] : null;
 
                   return (
-                    <div key={floor.id} className="p-4 border rounded-xl bg-gray-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-sm transition-all border-[#EAEAEA]">
+                    <div key={unit.unitId} className="p-4 border rounded-xl bg-gray-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 hover:shadow-sm transition-all border-[#EAEAEA]">
                       <div>
-                        <p className="font-bold text-lg">Floor {floor.floorNumber} - <span className={floor.status === 'vacant' ? 'text-green-600' : 'text-red-500'}>{floor.status === 'vacant' ? 'Vacant' : 'Occupied'}</span></p>
-                        <p className="text-xs text-gray-500 font-medium mt-1">Rent: ₹{floor.rentPrice} | Deposit: ₹{floor.securityDeposit || 0}</p>
+                        <p className="font-bold text-lg">{unit.unitName} ({unit.roomSize}) - <span className={unit.status === 'vacant' ? 'text-green-600' : 'text-red-500'}>{unit.status === 'vacant' ? 'Vacant' : 'Occupied'}</span></p>
+                        <p className="text-xs text-gray-500 font-medium mt-1">Rent: ₹{unit.rentAmount}</p>
 
-                        {floor.status === 'occupied' && tenant && (
+                        {unit.status === 'occupied' && tenant && (
                           <div className="text-sm bg-white p-2 rounded border mt-2">
                             <p className="font-semibold text-gray-800">Assigned Tenant: {isManual ? tenant.tenantName : tenant.name} {isManual && <span className="text-xs text-blue-500 bg-blue-50 px-1 rounded ml-1">Manual</span>}</p>
                             <p className="text-gray-500">{tenant.phone}</p>
@@ -1504,21 +1511,21 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                       <div className="flex flex-col gap-2 w-full md:w-auto">
                         <div className="flex gap-2">
                           <button className="px-3 py-1.5 border border-[#1565C0] text-[#1565C0] rounded-lg text-sm font-semibold hover:bg-blue-50" onClick={() => {
-                            setEditingFloor(floor);
-                            setEditFloorData({ rentAmount: floor.rentPrice.toString(), securityDeposit: (floor.securityDeposit || 0).toString() });
-                            setIsEditFloorModalOpen(true);
+                            setEditingUnit(unit);
+                            setEditUnitData({ unitName: unit.unitName, roomSize: unit.roomSize, rentAmount: unit.rentAmount.toString() });
+                            setIsEditUnitModalOpen(true);
                           }}>
-                            Edit Rent
+                            Edit Details
                           </button>
-                          {floor.status === 'occupied' && (
-                            <button className="px-3 py-1.5 border border-red-500 text-red-500 rounded-lg text-sm font-semibold hover:bg-red-50 transition-colors" onClick={() => handleMarkVacant(floor)}>
+                          {unit.status === 'occupied' && (
+                            <button className="px-3 py-1.5 border border-red-500 text-red-500 rounded-lg text-sm font-semibold hover:bg-red-50 transition-colors" onClick={() => handleMarkVacant(unit)}>
                               Mark Vacant
                             </button>
                           )}
-                          {floor.status === 'vacant' && (
+                          {unit.status === 'vacant' && (
                             <button className="px-3 py-1.5 bg-[#4B5EAA] text-white rounded-lg text-sm font-semibold hover:bg-opacity-90 transition-colors whitespace-nowrap" onClick={() => {
-                              setSelectedFloorForManual(floor);
-                              setManualTenantForm({ ...manualTenantForm, rentAmount: floor.rentPrice.toString() });
+                              setSelectedUnitForManual(unit);
+                              setManualTenantForm({ ...manualTenantForm, rentAmount: unit.rentAmount.toString() });
                               setIsManualTenantModalOpen(true);
                             }}>
                               Add Tenant
@@ -1534,19 +1541,23 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
           )}
         </Modal>
 
-        {/* Edit Floor Modal */}
-        <Modal isOpen={isEditFloorModalOpen} onClose={() => { setIsEditFloorModalOpen(false); setEditingFloor(null); }} title="Edit Floor Details">
-          <form onSubmit={handleEditFloorSubmit} className="space-y-4">
+        {/* Edit Unit Modal */}
+        <Modal isOpen={isEditUnitModalOpen} onClose={() => { setIsEditUnitModalOpen(false); setEditingUnit(null); }} title="Edit Unit Details">
+          <form onSubmit={handleEditUnitSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Unit Name</label>
+              <input required type="text" value={editUnitData.unitName} onChange={e => setEditUnitData({ ...editUnitData, unitName: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA]" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Room Size</label>
+              <input required type="text" value={editUnitData.roomSize} onChange={e => setEditUnitData({ ...editUnitData, roomSize: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA]" />
+            </div>
             <div>
               <label className="block text-sm font-medium mb-1">Rent Amount (₹)</label>
-              <input required type="number" value={editFloorData.rentAmount} onChange={e => setEditFloorData({ ...editFloorData, rentAmount: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA]" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Security Deposit (₹)</label>
-              <input type="number" value={editFloorData.securityDeposit} onChange={e => setEditFloorData({ ...editFloorData, securityDeposit: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA]" />
+              <input required type="number" value={editUnitData.rentAmount} onChange={e => setEditUnitData({ ...editUnitData, rentAmount: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA]" />
             </div>
             <div className="flex gap-3 pt-4">
-              <Button type="button" variant="outline" onClick={() => setIsEditFloorModalOpen(false)} fullWidth>Cancel</Button>
+              <Button type="button" variant="outline" onClick={() => setIsEditUnitModalOpen(false)} fullWidth>Cancel</Button>
               <Button type="submit" fullWidth>Save Changes</Button>
             </div>
           </form>
@@ -1556,7 +1567,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         <Modal isOpen={isManualTenantModalOpen} onClose={() => setIsManualTenantModalOpen(false)} title="Add Tenant Manually">
           <form onSubmit={handleManualTenantSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto px-2 pb-2">
             <div className="bg-blue-50 p-3 rounded-lg text-sm text-blue-800 mb-2 border border-blue-100">
-              Adding to: <span className="font-bold">{selectedPropertyForFloors?.propertyTitle}</span> - Floor <span className="font-bold">{selectedFloorForManual?.floorNumber}</span>
+              Adding to: <span className="font-bold">{selectedPropertyForUnits?.propertyTitle}</span> - Unit <span className="font-bold">{selectedUnitForManual?.unitName}</span>
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Tenant Name *</label>

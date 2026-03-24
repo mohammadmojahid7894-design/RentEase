@@ -85,28 +85,16 @@ export interface Property {
   isOccupied?: boolean;
   tenantId?: string;
   images?: string[];
-  totalUnits?: number;
-  floorsCount?: number;
+  units?: PropertyUnit[];
 }
 
 export interface PropertyUnit {
-  id: string; // unitId
-  unitNumber: number;
+  unitId: string;
+  unitName: string;
+  roomSize: string;
+  rentAmount: number;
   status: 'vacant' | 'occupied';
   tenantId?: string;
-  rentAmount: number;
-  securityDeposit?: number;
-  createdAt?: string;
-}
-
-export interface PropertyFloor {
-  id: string; // floorId
-  floorNumber: number;
-  rentPrice: number;
-  status: 'vacant' | 'occupied' | 'partial';
-  maxTenants?: number;
-  tenantId?: string;
-  securityDeposit?: number;
   createdAt?: string;
 }
 
@@ -119,7 +107,7 @@ export interface InterestRequest {
   assignedUnitId?: string;
   unitId?: string;
   depositAmount?: number;
-  selectedFloors?: string[];
+  selectedUnits?: string[];
   totalRent?: number;
 }
 
@@ -135,7 +123,6 @@ export interface ManualTenant {
   moveInDate?: string;
   createdByOwner: string;
   createdAt: string;
-  floorId?: string;
 }
 
 export interface Payment {
