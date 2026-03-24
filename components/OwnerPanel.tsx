@@ -325,6 +325,16 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         const snap = await getDocs(reqQ);
         allReqs = [...allReqs, ...snap.docs.map(d => ({ id: d.id, ...d.data() } as InterestRequest))];
       }
+      
+      const now = Date.now();
+      for (const r of allReqs) {
+        if (r.status === 'approved' && r.approvedAt) {
+          if (now - new Date(r.approvedAt).getTime() > 24 * 60 * 60 * 1000) {
+            await updateDoc(doc(db, 'requests', r.id!), { status: 'cancelled_due_to_no_payment' });
+            r.status = 'cancelled_due_to_no_payment';
+          }
+        }
+      }
       setRequests(allReqs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
 
       // Fetch Tenant Data
@@ -487,24 +497,15 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     if (!confirm) return;
 
     try {
-      if (req.selectedUnits && req.selectedUnits.length > 0) {
-        const propRef = doc(db, 'properties', req.propertyId);
-        const prop = properties.find(p => p.id === req.propertyId);
-        if (prop) {
-          const updatedUnits = prop.units?.map(u =>
-            req.selectedUnits?.includes(u.unitId) ? { ...u, status: 'occupied' as const, tenantId: req.tenantId } : u
-          ) || [];
-          await updateDoc(propRef, { units: updatedUnits });
-        }
-      }
-
-      // Update request status
+      const approvedAt = new Date().toISOString();
+      // Update request status only. Wait for payment.
       await updateDoc(doc(db, 'requests', req.id!), {
         status: 'approved',
+        approvedAt
       });
 
-      alert('Request approved! Units assigned.');
-      setRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'approved' } : r));
+      alert('Request approved! Awaiting payment from tenant.');
+      setRequests(prev => prev.map(r => r.id === req.id ? { ...r, status: 'approved', approvedAt } : r));
     } catch (err) {
       console.error(err);
       alert("Failed to approve request");
@@ -1079,9 +1080,15 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <span className={`px-2 py-1 rounded text-xs font-bold uppercase ${req.status === 'pending' ? 'bg-yellow-100 text-yellow-700' :
-                            req.status === 'approved' ? 'bg-green-100 text-green-700' :
+                            req.status === 'approved' ? 'bg-blue-100 text-blue-700' :
+                            req.status === 'paid' ? 'bg-green-100 text-green-700' :
+                            req.status === 'cancelled_due_to_no_payment' ? 'bg-gray-100 text-gray-700' :
                               'bg-red-100 text-red-700'
-                            }`}>{req.status}</span>
+                            }`}>{
+                              req.status === 'approved' ? 'Approved - Awaiting Payment' :
+                              req.status === 'cancelled_due_to_no_payment' ? 'Cancelled (No Payment)' :
+                              req.status
+                            }</span>
                           <span className="text-sm text-gray-500">{new Date(req.createdAt).toLocaleDateString()}</span>
                         </div>
                         <h4 className="text-lg font-bold text-[#2D3436]">

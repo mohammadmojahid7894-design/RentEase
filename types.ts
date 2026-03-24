@@ -102,8 +102,9 @@ export interface InterestRequest {
   id?: string;
   tenantId: string;
   propertyId: string;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'paid' | 'cancelled_due_to_no_payment';
   createdAt: string;
+  approvedAt?: string;
   assignedUnitId?: string;
   unitId?: string;
   depositAmount?: number;
@@ -170,12 +171,14 @@ export interface RentPaymentRecord {
   id?: string;
   tenantId: string;
   propertyId: string;
-  noticeId: string;
+  noticeId?: string;
+  requestId?: string;
   amount: number;
   month: string;
   paymentDate: string;
   paymentMethod: string;
   status: 'completed';
+  transactionId?: string;
   createdAt: string;
 }
 

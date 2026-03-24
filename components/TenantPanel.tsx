@@ -56,6 +56,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const [isPaymentSuccessOpen, setIsPaymentSuccessOpen] = useState(false);
   const [lastTxData, setLastTxData] = useState<{ id: string; method: string; amount: number; month: string } | null>(null);
 
+  const [selectedRequestToPay, setSelectedRequestToPay] = useState<InterestRequest | null>(null);
+  const [isRequestPayModalOpen, setIsRequestPayModalOpen] = useState(false);
+
   // ── Notifications State
   const [myNotifications, setMyNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -122,8 +125,17 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   useEffect(() => {
     if (!user.id) return;
     const q = query(collection(db, 'requests'), where('tenantId', '==', user.id));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
       const reqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InterestRequest));
+      const now = Date.now();
+      for (const r of reqData) {
+        if (r.status === 'approved' && r.approvedAt) {
+          if (now - new Date(r.approvedAt).getTime() > 24 * 60 * 60 * 1000) {
+            await updateDoc(doc(db, 'requests', r.id!), { status: 'cancelled_due_to_no_payment' });
+            r.status = 'cancelled_due_to_no_payment';
+          }
+        }
+      }
       setMyRequests(reqData.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
     });
     return () => unsubscribe();
@@ -353,6 +365,59 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     }
   };
 
+
+  // ── Pay Request Handler
+  const handlePayRequest = async (method: string, transactionId: string, amount: number) => {
+    if (!selectedRequestToPay?.id || !user.id) return;
+    try {
+      const propRef = doc(db, 'properties', selectedRequestToPay.propertyId);
+      const prop = allProperties.find(p => p.id === selectedRequestToPay.propertyId);
+
+      if (prop && selectedRequestToPay.selectedUnits && selectedRequestToPay.selectedUnits.length > 0) {
+        const updatedUnits = prop.units?.map(u =>
+          selectedRequestToPay.selectedUnits?.includes(u.unitId) ? { ...u, status: 'occupied' as const, tenantId: user.id } : u
+        ) || [];
+        await updateDoc(propRef, { units: updatedUnits });
+      }
+
+      await updateDoc(doc(db, 'requests', selectedRequestToPay.id), {
+        status: 'paid',
+        paymentDate: new Date().toISOString()
+      });
+
+      await addDoc(collection(db, 'rent_payments'), {
+        tenantId: user.id,
+        ownerId: prop?.ownerId || '',
+        propertyId: selectedRequestToPay.propertyId,
+        requestId: selectedRequestToPay.id,
+        amount,
+        month: 'Initial Security & Rent',
+        paymentDate: new Date().toISOString(),
+        paymentMethod: method,
+        transactionId,
+        status: 'completed',
+        createdAt: new Date().toISOString()
+      });
+
+      if (prop?.ownerId) {
+        await addDoc(collection(db, 'notifications'), {
+          userId: prop.ownerId,
+          type: 'payment',
+          message: `Tenant ${user.name} has paid ₹${amount} and secured ${prop.propertyTitle}. Property assigned.`,
+          status: 'unread',
+          createdAt: new Date().toISOString()
+        });
+      }
+
+      setIsRequestPayModalOpen(false);
+      setLastTxData({ id: transactionId, method, amount, month: 'Initial Security & Rent' });
+      setIsPaymentSuccessOpen(true);
+      setSelectedRequestToPay(null);
+    } catch (err) {
+      console.error(err);
+      alert('Payment failed. Please try again.');
+    }
+  };
 
   // ── Pay Rent Handler
   const handlePayRent = async (method: string, transactionId: string) => {
@@ -689,9 +754,15 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                       <div>
                         <div className="flex items-center gap-3 mb-2">
                           <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase shadow-sm ${req.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
-                            req.status === 'approved' ? 'bg-green-100 text-green-700 border border-green-200' :
+                            req.status === 'approved' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
+                            req.status === 'paid' ? 'bg-green-100 text-green-700 border border-green-200' :
+                            req.status === 'cancelled_due_to_no_payment' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
                               'bg-red-100 text-red-700 border border-red-200'
-                            }`}>{req.status}</span>
+                            }`}>{
+                              req.status === 'approved' ? 'Approved - Awaiting Payment' :
+                              req.status === 'cancelled_due_to_no_payment' ? 'Cancelled (No Payment)' :
+                              req.status
+                            }</span>
                           <span className="text-sm text-gray-400 font-medium">Applied on {new Date(req.createdAt).toLocaleDateString()}</span>
                         </div>
                         <h4 className="text-xl font-bold text-[#2D3436] mt-3">
@@ -702,6 +773,18 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                           <p className="text-[#1565C0] font-bold text-sm mt-1">
                             {req.selectedUnits.length} Unit{req.selectedUnits.length > 1 ? 's' : ''} Requested
                           </p>
+                        )}
+                        {req.status === 'approved' && (
+                          <Button 
+                            variant="primary" 
+                            className="mt-3 shadow-md border border-[#3D4D8C] hover:-translate-y-0.5" 
+                            onClick={() => {
+                              setSelectedRequestToPay(req);
+                              setIsRequestPayModalOpen(true);
+                            }}
+                          >
+                            Pay Now to Secure
+                          </Button>
                         )}
                       </div>
                       <div className="text-right flex flex-col items-end gap-1">
@@ -1097,7 +1180,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
           </form>
         </Modal>
 
-        {/* Payment Gateway Modal */}
+        {/* Payment Gateway Modal for Rent */}
         {selectedNotice && (
           <PaymentModal
             isOpen={isPayModalOpen}
@@ -1107,6 +1190,21 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
             onPaymentSuccess={handlePayRent}
           />
         )}
+
+        {/* Payment Gateway Modal for Requests */}
+        {selectedRequestToPay && (() => {
+          const prop = allProperties.find(p => p.id === selectedRequestToPay.propertyId);
+          const totalAmount = (selectedRequestToPay.totalRent || prop?.rentAmount || 0) + (selectedRequestToPay.depositAmount || prop?.securityDeposit || 0);
+          return (
+            <PaymentModal
+              isOpen={isRequestPayModalOpen}
+              onClose={() => { setIsRequestPayModalOpen(false); setSelectedRequestToPay(null); }}
+              amount={totalAmount}
+              month="Initial Security & Rent"
+              onPaymentSuccess={(method, txId) => handlePayRequest(method, txId, totalAmount)}
+            />
+          );
+        })()}
         
         {/* Payment Success Modal */}
         {lastTxData && (
