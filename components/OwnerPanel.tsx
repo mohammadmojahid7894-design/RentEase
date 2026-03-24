@@ -452,9 +452,9 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         description: newProperty.description,
         propertyType: newProperty.propertyType,
         availabilityStatus: newProperty.availabilityStatus,
-        status: 'pending',
+        status: 'approved',
         submittedAt: new Date().toISOString(),
-        isVisibleToTenants: false,
+        isVisibleToTenants: true,
         createdAt: new Date().toISOString(),
         units: newProperty.units.map(u => ({ ...u, rentAmount: Number(u.rentAmount) }))
       };
@@ -471,7 +471,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         availabilityStatus: 'available',
         units: [{ unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] as PropertyUnit[]
       });
-      alert('Your property has been submitted for admin verification.');
+      alert('Your property has been successfully added and is now visible to tenants.');
     } catch (err) {
       console.error(err);
       alert('Failed to add property');
