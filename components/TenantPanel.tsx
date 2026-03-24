@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { User, Property, InterestRequest, PropertyUnit, RentNotice, AppNotification, Complaint, ComplaintStatus, ComplaintPriority, RentRecord, RentPaymentRecord } from '../types';
-import { db, storage } from '../firebase';
+import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { uploadImage } from '../cloudinary';
 import { Icons } from '../constants';
 import Button from './Button';
 import Layout from './Layout';
@@ -241,23 +241,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     setIsApplyModalOpen(true);
   };
 
-  // ── Upload helper with 3-attempt exponential-backoff retry ───────────────
+  // ── Upload helper using Cloudinary ───────────────
   const uploadFile = async (file: File, folder: string): Promise<string> => {
-    const MAX_RETRIES = 3;
-    let lastErr: unknown;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const fileRef = ref(storage, `documents/${user.id}/${folder}_${Date.now()}_${file.name}`);
-        await uploadBytes(fileRef, file);
-        return await getDownloadURL(fileRef);
-      } catch (err) {
-        lastErr = err;
-        if (attempt < MAX_RETRIES) {
-          await new Promise(r => setTimeout(r, attempt * 1000));
-        }
-      }
-    }
-    throw lastErr;
+    return await uploadImage(file);
   };
 
   // ── Submit request ─────────────────────────────────
@@ -390,11 +376,25 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         where('month', '==', selectedNotice.month)
       );
       const recordsSnap = await getDocs(recordsQ);
-      for (const rDoc of recordsSnap.docs) {
-         await updateDoc(doc(db, 'rentRecords', rDoc.id), {
+      if (recordsSnap.empty) {
+         // Create it to ensure OwnerPanel financial summary reflects it
+         await addDoc(collection(db, 'rentRecords'), {
+            tenantId: user.id,
+            propertyId: selectedNotice.propertyId,
+            month: selectedNotice.month,
+            rentAmount: selectedNotice.rentAmount,
+            dueDate: selectedNotice.dueDate,
             status: 'paid',
-            paymentDate: new Date().toISOString()
+            paymentDate: new Date().toISOString(),
+            createdAt: new Date().toISOString()
          });
+      } else {
+         for (const rDoc of recordsSnap.docs) {
+            await updateDoc(doc(db, 'rentRecords', rDoc.id), {
+               status: 'paid',
+               paymentDate: new Date().toISOString()
+            });
+         }
       }
 
       // Save payment record
@@ -599,6 +599,18 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                   const owner = ownerDocs[prop.ownerId];
                   return (
                     <div key={prop.id} className="bg-white rounded-2xl border border-[#EAEAEA] overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col h-full border-t-4 border-t-[#4B5EAA]">
+                      {prop.images && prop.images.length > 0 && (
+                        <div className="w-full h-48 bg-gray-100 flex overflow-x-auto snap-x snap-mandatory relative" style={{ scrollbarWidth: 'none' }}>
+                          {prop.images.map((imgUrl, i) => (
+                            <img key={i} src={imgUrl} alt={`${prop.propertyTitle} image ${i + 1}`} className="w-full h-full object-cover shrink-0 snap-center" />
+                          ))}
+                          {prop.images.length > 1 && (
+                            <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full font-bold shadow">
+                              {prop.images.length} Photos
+                            </div>
+                          )}
+                        </div>
+                      )}
                       <div className="p-5 flex flex-col flex-1">
                         <div className="flex justify-between items-start mb-3">
                           <div>

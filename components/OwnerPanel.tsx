@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { User, Property, InterestRequest, PropertyType, PropertyUnit, RentNotice, RentPaymentRecord, AppNotification, Complaint, ComplaintStatus, ComplaintPriority, RentRecord } from '../types';
-import { db, storage } from '../firebase';
+import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot, orderBy, deleteDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { uploadImage } from "../cloudinary";
 import { useAuth } from '../contexts/AuthContext';
 import { Icons } from '../constants';
 import Button from './Button';
@@ -48,6 +48,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     units: [{ unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] as PropertyUnit[]
   });
   const [addingProperty, setAddingProperty] = useState(false);
+  const [newPropertyImages, setNewPropertyImages] = useState<File[]>([]);
 
   // Manual Tenant State
   const [isManualTenantModalOpen, setIsManualTenantModalOpen] = useState(false);
@@ -135,10 +136,10 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         const pTotal = units.length;
         let pOcc = 0;
         units.forEach(u => {
-          if (u.status === 'occupied') { 
-             occ++; 
-             pOcc++; 
-             tRent += Number(u.rentAmount) || 0;
+          if (u.status === 'occupied') {
+            occ++;
+            pOcc++;
+            tRent += Number(u.rentAmount) || 0;
           }
         });
         tUnits += pTotal;
@@ -170,18 +171,21 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   useEffect(() => {
     if (properties.length === 0) return;
     const ids = properties.map(p => p.id);
-    const fetchPayments = async () => {
-      let all: RentPaymentRecord[] = [];
-      for (let i = 0; i < ids.length; i += 10) {
-        const chunk = ids.slice(i, i + 10);
-        const snap = await getDocs(query(collection(db, 'rent_payments'), where('propertyId', 'in', chunk)));
-        all = [...all, ...snap.docs.map(d => ({ id: d.id, ...d.data() } as RentPaymentRecord))];
-      }
-      setPayments(all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-    };
-    fetchPayments();
-    const iv = setInterval(fetchPayments, 15000);
-    return () => clearInterval(iv);
+    const unsubs: (() => void)[] = [];
+    
+    setPayments([]);
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const unsub = onSnapshot(query(collection(db, 'rent_payments'), where('propertyId', 'in', chunk)), snap => {
+        const chunkData = snap.docs.map(d => ({ id: d.id, ...d.data() } as RentPaymentRecord));
+        setPayments(prev => {
+          const others = prev.filter(p => !chunk.includes(p.propertyId));
+          return [...others, ...chunkData].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        });
+      });
+      unsubs.push(unsub);
+    }
+    return () => unsubs.forEach(u => u());
   }, [properties]);
 
   // Fetch Notifications for owner
@@ -200,43 +204,46 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   useEffect(() => {
     if (properties.length === 0) return;
     const ids = properties.map(p => p.id);
-    const fetchComplaints = async () => {
-      let all: Complaint[] = [];
-      for (let i = 0; i < ids.length; i += 10) {
-        const chunk = ids.slice(i, i + 10);
-        const snap = await getDocs(query(collection(db, 'complaints'), where('propertyId', 'in', chunk)));
-        all = [...all, ...snap.docs.map(d => ({ id: d.id, ...d.data() } as Complaint))];
-      }
-      setComplaints(all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-    };
-    fetchComplaints();
-    const iv = setInterval(fetchComplaints, 15000);
-    return () => clearInterval(iv);
+    const unsubs: (() => void)[] = [];
+
+    setComplaints([]);
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const unsub = onSnapshot(query(collection(db, 'complaints'), where('propertyId', 'in', chunk)), snap => {
+        const chunkData = snap.docs.map(d => ({ id: d.id, ...d.data() } as Complaint));
+        setComplaints(prev => {
+          const others = prev.filter(p => !chunk.includes(p.propertyId));
+          return [...others, ...chunkData].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        });
+      });
+      unsubs.push(unsub);
+    }
+    return () => unsubs.forEach(u => u());
   }, [properties]);
 
   // Fetch Rent Records for owner's properties
   useEffect(() => {
     if (properties.length === 0) return;
     const ids = properties.map(p => p.id);
-    const fetchRentRecords = async () => {
-      let all: RentRecord[] = [];
-      for (let i = 0; i < ids.length; i += 10) {
-        const chunk = ids.slice(i, i + 10);
-        const snap = await getDocs(query(collection(db, 'rentRecords'), where('propertyId', 'in', chunk)));
-        all = [...all, ...snap.docs.map(d => ({ id: d.id, ...d.data() } as RentRecord))];
-      }
-      all.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      setRentRecords(all);
+    const unsubs: (() => void)[] = [];
 
-      // Check for late payments & send reminders
-      const now = new Date();
-      for (const rec of all) {
-        if (rec.status === 'pending') {
-          const due = new Date(rec.dueDate);
-          const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-          if (diffDays <= 0) {
-            // Mark as late
-            if (rec.id) {
+    setRentRecords([]);
+    for (let i = 0; i < ids.length; i += 10) {
+      const chunk = ids.slice(i, i + 10);
+      const unsub = onSnapshot(query(collection(db, 'rentRecords'), where('propertyId', 'in', chunk)), snap => {
+        const chunkData = snap.docs.map(d => ({ id: d.id, ...d.data() } as RentRecord));
+        setRentRecords(prev => {
+          const others = prev.filter(p => !chunk.includes(p.propertyId));
+          return [...others, ...chunkData].sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        });
+
+        // Check for late payments
+        const now = new Date();
+        chunkData.forEach(async rec => {
+          if (rec.status === 'pending') {
+            const due = new Date(rec.dueDate);
+            const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            if (diffDays <= 0 && rec.id) {
               await updateDoc(doc(db, 'rentRecords', rec.id), { status: 'late' });
               await addDoc(collection(db, 'notifications'), {
                 userId: rec.tenantId,
@@ -253,31 +260,19 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                 createdAt: new Date().toISOString()
               });
             }
-          } else if (diffDays <= 3) {
-            // Send reminder (check if one was already sent for this record to avoid duplicates)
-            if (rec.id) {
-              await addDoc(collection(db, 'notifications'), {
-                userId: rec.tenantId,
-                type: 'reminder',
-                message: `🔔 Reminder: Your rent of ₹${rec.rentAmount} for ${rec.month} is due in ${diffDays} day${diffDays === 1 ? '' : 's'}.`,
-                status: 'unread',
-                createdAt: new Date().toISOString()
-              });
-            }
           }
-        }
-      }
-    };
-    fetchRentRecords();
-    const iv = setInterval(fetchRentRecords, 30000);
-    return () => clearInterval(iv);
+        });
+      });
+      unsubs.push(unsub);
+    }
+    return () => unsubs.forEach(u => u());
   }, [properties, user.id]);
 
   // Compute financial stats from actual payments and records
   useEffect(() => {
     // Total Monthly Rent = Fixed Expectation computed from occupied units
     const totalMonthlyRent = ownerStats.totalMonthlyRentConfigured || 0;
-    
+
     // Actually sum up real payments for "Total Paid" instead of only relying on rentRecords that are paid.
     // However, if the owner manually marks a record as paid but there's no payment record, it should still count.
     // Wait, rentRecords handles this cleanly now since payment modal syncs the two.
@@ -285,7 +280,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     const totalPending = rentRecords.filter(r => r.status === 'pending').reduce((s, r) => s + r.rentAmount, 0);
     const totalLate = rentRecords.filter(r => r.status === 'late').reduce((s, r) => s + r.rentAmount, 0);
     const lateCount = rentRecords.filter(r => r.status === 'late').length;
-    
+
     setFinancialStats({ totalMonthlyRent, totalPaid, totalPending, totalLate, lateCount });
   }, [rentRecords, ownerStats.totalMonthlyRentConfigured]);
 
@@ -372,7 +367,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
       return;
     }
     setUnitsLoading(true);
-    
+
     // Listen to changes on the selected property document itself
     const q = doc(db, 'properties', selectedPropertyForUnits.id);
     const unsub = onSnapshot(q, async (snap) => {
@@ -443,6 +438,11 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     e.preventDefault();
     setAddingProperty(true);
     try {
+      let imageUrls: string[] = [];
+      if (newPropertyImages.length > 0) {
+        imageUrls = await Promise.all(newPropertyImages.map(file => uploadImage(file)));
+      }
+
       const propData = {
         ownerId: user.id,
         propertyTitle: newProperty.propertyTitle,
@@ -452,15 +452,17 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         description: newProperty.description,
         propertyType: newProperty.propertyType,
         availabilityStatus: newProperty.availabilityStatus,
-        status: 'approved',
+        status: 'pending',
         submittedAt: new Date().toISOString(),
-        isVisibleToTenants: true,
+        isVisibleToTenants: false,
         createdAt: new Date().toISOString(),
+        images: imageUrls,
         units: newProperty.units.map(u => ({ ...u, rentAmount: Number(u.rentAmount) }))
       };
       await addDoc(collection(db, 'properties'), propData);
 
       setIsPropertyModalOpen(false);
+      setNewPropertyImages([]);
       setNewProperty({
         propertyTitle: '',
         location: '',
@@ -471,7 +473,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         availabilityStatus: 'available',
         units: [{ unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] as PropertyUnit[]
       });
-      alert('Your property has been successfully added and is now visible to tenants.');
+      alert('Your property has been submitted for approval. It will be visible to tenants once approved by the admin.');
     } catch (err) {
       console.error(err);
       alert('Failed to add property');
@@ -489,10 +491,10 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         const propRef = doc(db, 'properties', req.propertyId);
         const prop = properties.find(p => p.id === req.propertyId);
         if (prop) {
-            const updatedUnits = prop.units?.map(u => 
-                req.selectedUnits?.includes(u.unitId) ? { ...u, status: 'occupied' as const, tenantId: req.tenantId } : u
-            ) || [];
-            await updateDoc(propRef, { units: updatedUnits });
+          const updatedUnits = prop.units?.map(u =>
+            req.selectedUnits?.includes(u.unitId) ? { ...u, status: 'occupied' as const, tenantId: req.tenantId } : u
+          ) || [];
+          await updateDoc(propRef, { units: updatedUnits });
         }
       }
 
@@ -538,7 +540,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     e.preventDefault();
     if (!selectedPropertyForUnits || !editingUnit) return;
     try {
-      const updatedUnits = selectedPropertyForUnits.units?.map(u => 
+      const updatedUnits = selectedPropertyForUnits.units?.map(u =>
         u.unitId === editingUnit.unitId ? { ...u, unitName: editUnitData.unitName, roomSize: editUnitData.roomSize, rentAmount: Number(editUnitData.rentAmount) } : u
       ) || [];
       await updateDoc(doc(db, 'properties', selectedPropertyForUnits.id), { units: updatedUnits });
@@ -574,7 +576,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         createdAt: new Date().toISOString()
       };
 
-      const updatedUnits = selectedPropertyForUnits.units?.map(u => 
+      const updatedUnits = selectedPropertyForUnits.units?.map(u =>
         u.unitId === selectedUnitForManual.unitId ? { ...u, status: 'occupied' as const, tenantId: tenantId } : u
       ) || [];
       await updateDoc(doc(db, 'properties', selectedPropertyForUnits.id), { units: updatedUnits });
@@ -611,9 +613,8 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
 
       let photoUrl = user.profilePhoto || user.documents?.profilePhotoUrl;
       if (profilePhotoFile) {
-        const fileRef = ref(storage, `documents/${user.id}/photo_${Date.now()}_${profilePhotoFile.name}`);
-        await uploadBytes(fileRef, profilePhotoFile);
-        photoUrl = await getDownloadURL(fileRef);
+        photoUrl = await uploadImage(profilePhotoFile);
+        console.log("Photo URL:", photoUrl);
       }
 
       const updateData = {
@@ -683,12 +684,12 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         createdAt: new Date().toISOString()
       };
       await addDoc(collection(db, 'notices'), noticeData);
-      
+
       // Auto-generate a Rent Record if it doesn't exist for financial tracking
       const recordsQ = query(
-        collection(db, 'rentRecords'), 
-        where('tenantId', '==', noticeForm.tenantId), 
-        where('propertyId', '==', noticeForm.propertyId), 
+        collection(db, 'rentRecords'),
+        where('tenantId', '==', noticeForm.tenantId),
+        where('propertyId', '==', noticeForm.propertyId),
         where('month', '==', noticeForm.month)
       );
       const recordsSnap = await getDocs(recordsQ);
@@ -996,6 +997,18 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {properties.map(p => (
                   <div key={p.id} className="bg-white rounded-2xl border border-[#EAEAEA] overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 group flex flex-col h-full border-t-4 border-t-[#4B5EAA]">
+                    {p.images && p.images.length > 0 && (
+                      <div className="w-full h-40 bg-gray-100 flex overflow-x-auto snap-x snap-mandatory relative" style={{ scrollbarWidth: 'none' }}>
+                        {p.images.map((imgUrl, i) => (
+                          <img key={i} src={imgUrl} alt={`${p.propertyTitle} image ${i + 1}`} className="w-full h-full object-cover shrink-0 snap-center" />
+                        ))}
+                        {p.images.length > 1 && (
+                          <div className="absolute bottom-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full font-bold shadow">
+                            {p.images.length} Photos
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="p-5 flex flex-col flex-1">
                       <div className="flex justify-between items-start mb-4">
                         <div>
@@ -1424,10 +1437,15 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Description</label>
               <textarea required rows={3} value={newProperty.description} onChange={e => setNewProperty({ ...newProperty, description: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="Beautiful flat with park view..."></textarea>
             </div>
-              <div>
-                <label className="block text-sm font-medium text-[#2D3436] mb-1">Security Deposit (₹) <span className="text-gray-400 font-normal">(Optional)</span></label>
-                <input type="number" value={newProperty.securityDeposit} onChange={e => setNewProperty({ ...newProperty, securityDeposit: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="30000" />
-              </div>
+            <div>
+              <label className="block text-sm font-medium text-[#2D3436] mb-1">Property Images (Multiple)</label>
+              <input type="file" multiple accept="image/*" onChange={e => setNewPropertyImages(Array.from(e.target.files || []))} className="w-full p-2 border border-[#EAEAEA] bg-[#F9F8F6] rounded-xl" />
+              {newPropertyImages.length > 0 && <p className="text-xs text-gray-500 mt-1 pl-1">{newPropertyImages.length} images selected.</p>}
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-[#2D3436] mb-1">Security Deposit (₹) <span className="text-gray-400 font-normal">(Optional)</span></label>
+              <input type="number" value={newProperty.securityDeposit} onChange={e => setNewProperty({ ...newProperty, securityDeposit: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="30000" />
+            </div>
             <div>
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Property Type</label>
               <select value={newProperty.propertyType} onChange={e => setNewProperty({ ...newProperty, propertyType: e.target.value as PropertyType })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]">
@@ -1436,14 +1454,14 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                 ))}
               </select>
             </div>
-              <div>
-                <label className="block text-sm font-medium text-[#2D3436] mb-1">Status</label>
-                <select value={newProperty.availabilityStatus} onChange={e => setNewProperty({ ...newProperty, availabilityStatus: e.target.value as 'available' | 'rented' })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]">
-                  <option value="available">Available</option>
-                  <option value="rented">Rented</option>
-                </select>
-              </div>
-            
+            <div>
+              <label className="block text-sm font-medium text-[#2D3436] mb-1">Status</label>
+              <select value={newProperty.availabilityStatus} onChange={e => setNewProperty({ ...newProperty, availabilityStatus: e.target.value as 'available' | 'rented' })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]">
+                <option value="available">Available</option>
+                <option value="rented">Rented</option>
+              </select>
+            </div>
+
             <div className="border border-[#EAEAEA] rounded-xl p-4 bg-gray-50 mt-4">
               <div className="flex justify-between items-center mb-4">
                 <label className="block text-sm font-medium text-[#2D3436]">Units / Flats</label>

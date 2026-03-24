@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, deleteDoc, writeBatch, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, writeBatch, updateDoc, addDoc } from 'firebase/firestore';
 import { User, Property, InterestRequest } from '../types';
 import { Icons } from '../constants';
 import { Language } from '../translations';
@@ -56,12 +56,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
   const handleApproveProperty = async (id: string) => {
     if (window.confirm("Approve this property? It will be visible to tenants.")) {
       try {
+        const propToApprove = properties.find(p => p.id === id);
+        
         await updateDoc(doc(db, 'properties', id), {
           status: 'approved',
           approvedAt: new Date().toISOString(),
           approvedBy: user.id,
           isVisibleToTenants: true
         });
+        
+        if (propToApprove?.ownerId) {
+          await addDoc(collection(db, 'notifications'), {
+            userId: propToApprove.ownerId,
+            type: 'alert',
+            message: `🎉 Great news! Your property "${propToApprove.propertyTitle || 'Listing'}" has been approved by the admin and is now visible to tenants.`,
+            status: 'unread',
+            createdAt: new Date().toISOString()
+          });
+        }
+        
         setProperties(properties.map(p => p.id === id ? { ...p, status: 'approved', isVisibleToTenants: true } : p));
       } catch (err) {
          console.error(err);
@@ -78,12 +91,25 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
         return;
       }
       try {
+        const propToReject = properties.find(p => p.id === id);
+        
         await updateDoc(doc(db, 'properties', id), {
           status: 'rejected',
           rejectedAt: new Date().toISOString(),
           rejectionReason: reason,
           isVisibleToTenants: false
         });
+        
+        if (propToReject?.ownerId) {
+          await addDoc(collection(db, 'notifications'), {
+            userId: propToReject.ownerId,
+            type: 'alert',
+            message: `⚠️ Your property "${propToReject.propertyTitle || 'Listing'}" has been rejected. Reason: ${reason}.`,
+            status: 'unread',
+            createdAt: new Date().toISOString()
+          });
+        }
+        
         setProperties(properties.map(p => p.id === id ? { ...p, status: 'rejected', rejectionReason: reason, isVisibleToTenants: false } : p));
       } catch (err) {
          console.error(err);
@@ -257,6 +283,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
                 return (
                 <tr key={p.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
                   <td className="py-4 px-4 max-w-[200px]">
+                    {p.images && p.images.length > 0 && <img src={p.images[0]} className="w-16 h-12 object-cover rounded shadow mb-2" alt="Property" />}
                     <p className="font-bold text-gray-800 truncate">{p.propertyTitle || p.name || 'Untitled'}</p>
                     <p className="text-xs text-gray-500 truncate">{p.location || 'Unknown location'}</p>
                   </td>
