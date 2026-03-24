@@ -37,6 +37,14 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const [selectedUnits, setSelectedUnits] = useState<PropertyUnit[]>([]);
   const [ownerDocs, setOwnerDocs] = useState<Record<string, User>>({});
 
+  // ── Search & Filter State ──────────────────────────────────────────────────
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCity, setSelectedCity] = useState('');
+  const [priceRange, setPriceRange] = useState<[number, number]>([0, 100000]);
+  const [maxPriceInData, setMaxPriceInData] = useState(100000);
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+
   // Application Form States
   const [applyIdProofUrl, setApplyIdProofUrl] = useState<string>('');
   const [applyAddressProofUrl, setApplyAddressProofUrl] = useState<string>('');
@@ -90,6 +98,12 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       const propsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property)).filter(p => p.status === 'approved' || p.isVisibleToTenants === true || (!p.status && p.isVisibleToTenants === undefined));
       setAllProperties(propsData);
       setLoading(false);
+
+      // Compute max price for range slider
+      const allRents = propsData.flatMap(p => (p.units || []).map(u => u.rentAmount)).filter(Boolean);
+      const maxR = allRents.length > 0 ? Math.max(...allRents) : 100000;
+      setMaxPriceInData(Math.ceil(maxR / 1000) * 1000); // round up to nearest 1000
+      setPriceRange(prev => [prev[0], Math.ceil(maxR / 1000) * 1000]);
 
       // Extract vacant units directly from property document
       const pwf: PropertyWithUnits[] = [];
@@ -579,6 +593,91 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     }
   };
 
+  // ── Extract unique cities/locations for filter dropdown ──────────────────
+  const allCities = React.useMemo(() => {
+    const cities = new Set<string>();
+    propertiesWithUnits.forEach(p => {
+      const loc = p.location || '';
+      // Try to extract city from location string (e.g. "Saheed Nagar, Bhubaneswar")
+      const parts = loc.split(',').map(s => s.trim());
+      parts.forEach(part => { if (part) cities.add(part); });
+      if (p.city) cities.add(p.city);
+    });
+    return Array.from(cities).sort();
+  }, [propertiesWithUnits]);
+
+  const POPULAR_CITIES = ['Bhubaneswar', 'Bangalore', 'Mumbai', 'Delhi', 'Hyderabad', 'Pune', 'Chennai', 'Kolkata'];
+
+  // ── Filtered properties ─────────────────────────────────────────────────
+  const filteredProperties = React.useMemo(() => {
+    return propertiesWithUnits.filter(p => {
+      const loc = (p.location || '').toLowerCase();
+      const city = (p.city || '').toLowerCase();
+      const title = (p.propertyTitle || '').toLowerCase();
+      const q = searchQuery.toLowerCase().trim();
+
+      // Search query match (city, location, title)
+      if (q && !loc.includes(q) && !city.includes(q) && !title.includes(q)) return false;
+
+      // City dropdown filter
+      if (selectedCity) {
+        const sc = selectedCity.toLowerCase();
+        if (!loc.includes(sc) && !city.includes(sc)) return false;
+      }
+
+      // Price range filter — check if any unit falls in range
+      const unitRents = p.availableUnits.map(u => u.rentAmount);
+      const minUnitRent = Math.min(...unitRents);
+      if (minUnitRent > priceRange[1] || Math.max(...unitRents) < priceRange[0]) return false;
+
+      return true;
+    });
+  }, [propertiesWithUnits, searchQuery, selectedCity, priceRange]);
+
+  // ── Geolocation handler ────────────────────────────────────────────────
+  const handleUseMyLocation = () => {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser.');
+      return;
+    }
+    setGeoLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          // Use OpenStreetMap Nominatim for reverse geocoding (free, no API key)
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&zoom=10&addressdetails=1`,
+            { headers: { 'Accept-Language': 'en' } }
+          );
+          const data = await res.json();
+          const detectedCity = data.address?.city || data.address?.town || data.address?.state_district || data.address?.state || '';
+          if (detectedCity) {
+            setSearchQuery(detectedCity);
+            setSelectedCity('');
+          } else {
+            alert('Could not detect your city. Please search manually.');
+          }
+        } catch {
+          alert('Failed to get location details. Please search manually.');
+        } finally {
+          setGeoLoading(false);
+        }
+      },
+      () => {
+        setGeoLoading(false);
+        alert('Location access denied. You can search manually.');
+      },
+      { timeout: 10000 }
+    );
+  };
+
+  const clearFilters = () => {
+    setSearchQuery('');
+    setSelectedCity('');
+    setPriceRange([0, maxPriceInData]);
+  };
+
   const tabs = [
     { id: 'browse', label: 'Browse Properties', icon: Icons.Home },
     { id: 'requests', label: 'My Requests', icon: Icons.Rent },
@@ -718,14 +817,176 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
           <div className="space-y-6">
             <h3 className="text-2xl font-bold">Available Properties & Units</h3>
 
-            {propertiesWithUnits.length === 0 ? (
+            {/* ── Search Bar ───────────────────────────────────────────── */}
+            <div className="bg-white p-4 rounded-2xl border border-[#EAEAEA] shadow-sm space-y-4">
+              <div className="flex flex-col md:flex-row gap-3">
+                {/* Search Input */}
+                <div className="relative flex-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                    <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search by city, locality, or property name..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border border-[#DDDCDB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#4B5EAA] focus:border-transparent transition-all bg-[#FAFAFA]"
+                  />
+                </div>
+
+                {/* Use My Location */}
+                <button
+                  onClick={handleUseMyLocation}
+                  disabled={geoLoading}
+                  className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-[#4B5EAA] to-[#3D4D8C] text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-60 whitespace-nowrap shadow-sm"
+                >
+                  {geoLoading ? (
+                    <span className="flex items-center gap-2">
+                      <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
+                      Detecting...
+                    </span>
+                  ) : (
+                    <>
+                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                        <path fillRule="evenodd" d="m9.69 18.933.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 0 0 .281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 1 0 3 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 0 0 2.273 1.765 11.842 11.842 0 0 0 .976.536l.034.017Zm.31-10.433a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z" clipRule="evenodd" />
+                      </svg>
+                      Use My Location
+                    </>
+                  )}
+                </button>
+
+                {/* Toggle Filters */}
+                <button
+                  onClick={() => setShowFilters(!showFilters)}
+                  className={`flex items-center gap-2 px-4 py-3 border rounded-xl text-sm font-semibold transition-all whitespace-nowrap ${
+                    showFilters ? 'bg-[#4B5EAA] text-white border-[#4B5EAA]' : 'bg-white text-gray-700 border-[#DDDCDB] hover:bg-gray-50'
+                  }`}
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                    <path fillRule="evenodd" d="M2.628 1.601C5.028 1.206 7.49 1 10 1s4.973.206 7.372.601a.75.75 0 0 1 .628.74v2.288a2.25 2.25 0 0 1-.659 1.59l-4.682 4.683a2.25 2.25 0 0 0-.659 1.59v3.037c0 .684-.31 1.33-.844 1.757l-1.937 1.55A.75.75 0 0 1 8 18.25v-5.757a2.25 2.25 0 0 0-.659-1.591L2.659 6.22A2.25 2.25 0 0 1 2 4.629V2.34a.75.75 0 0 1 .628-.74Z" clipRule="evenodd" />
+                  </svg>
+                  Filters
+                </button>
+              </div>
+
+              {/* Popular Cities */}
+              <div className="flex flex-wrap gap-2">
+                <span className="text-xs text-gray-400 font-semibold uppercase tracking-wider self-center mr-1">Popular:</span>
+                {POPULAR_CITIES.map(city => (
+                  <button
+                    key={city}
+                    onClick={() => { setSearchQuery(city); setSelectedCity(''); }}
+                    className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-all ${
+                      searchQuery.toLowerCase() === city.toLowerCase()
+                        ? 'bg-[#4B5EAA] text-white border-[#4B5EAA]'
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-[#EEF2FF] hover:text-[#4B5EAA] hover:border-[#C7D2FE]'
+                    }`}
+                  >
+                    {city}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── Expanded Filters ──────────────────────────────────── */}
+              {showFilters && (
+                <div className="border-t border-[#EAEAEA] pt-4 space-y-4 animate-fadeIn">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* City Dropdown */}
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 block">City / Locality</label>
+                      <select
+                        value={selectedCity}
+                        onChange={e => setSelectedCity(e.target.value)}
+                        className="w-full px-3 py-2.5 border border-[#DDDCDB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#4B5EAA] bg-[#FAFAFA]"
+                      >
+                        <option value="">All Locations</option>
+                        {allCities.map(c => (
+                          <option key={c} value={c}>{c}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Price Range */}
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 block">
+                        Price Range: ₹{priceRange[0].toLocaleString('en-IN')} — ₹{priceRange[1].toLocaleString('en-IN')}
+                      </label>
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="range"
+                          min={0}
+                          max={maxPriceInData}
+                          step={500}
+                          value={priceRange[0]}
+                          onChange={e => setPriceRange([Math.min(Number(e.target.value), priceRange[1] - 500), priceRange[1]])}
+                          className="flex-1 accent-[#4B5EAA] h-2"
+                        />
+                        <span className="text-xs text-gray-400">to</span>
+                        <input
+                          type="range"
+                          min={0}
+                          max={maxPriceInData}
+                          step={500}
+                          value={priceRange[1]}
+                          onChange={e => setPriceRange([priceRange[0], Math.max(Number(e.target.value), priceRange[0] + 500)])}
+                          className="flex-1 accent-[#4B5EAA] h-2"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Active Filters & Clear */}
+                  {(searchQuery || selectedCity || priceRange[0] > 0 || priceRange[1] < maxPriceInData) && (
+                    <div className="flex items-center justify-between">
+                      <div className="flex flex-wrap gap-2">
+                        {searchQuery && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#EEF2FF] text-[#4B5EAA] rounded-full text-xs font-semibold border border-[#C7D2FE]">
+                            Search: "{searchQuery}"
+                            <button onClick={() => setSearchQuery('')} className="ml-1 hover:text-red-500">×</button>
+                          </span>
+                        )}
+                        {selectedCity && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#EEF2FF] text-[#4B5EAA] rounded-full text-xs font-semibold border border-[#C7D2FE]">
+                            City: {selectedCity}
+                            <button onClick={() => setSelectedCity('')} className="ml-1 hover:text-red-500">×</button>
+                          </span>
+                        )}
+                        {(priceRange[0] > 0 || priceRange[1] < maxPriceInData) && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#EEF2FF] text-[#4B5EAA] rounded-full text-xs font-semibold border border-[#C7D2FE]">
+                            ₹{priceRange[0].toLocaleString('en-IN')} — ₹{priceRange[1].toLocaleString('en-IN')}
+                            <button onClick={() => setPriceRange([0, maxPriceInData])} className="ml-1 hover:text-red-500">×</button>
+                          </span>
+                        )}
+                      </div>
+                      <button onClick={clearFilters} className="text-xs text-red-500 font-semibold hover:underline">Clear All</button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* ── Results Count ─────────────────────────────────────── */}
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-gray-500">
+                Showing <strong className="text-gray-800">{filteredProperties.length}</strong> of {propertiesWithUnits.length} properties
+              </p>
+            </div>
+
+            {/* ── Property Grid ─────────────────────────────────────── */}
+            {filteredProperties.length === 0 ? (
               <div className="text-center p-12 bg-white rounded-2xl border border-dashed border-[#EAEAEA]">
-                <Icons.Home />
-                <p className="mt-4 text-lg text-gray-500">No properties with vacant units at the moment.</p>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 mx-auto text-gray-300 mb-3">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z" />
+                </svg>
+                <p className="text-lg text-gray-500">No properties found matching your search.</p>
+                <p className="text-sm text-gray-400 mt-1">Try adjusting your filters or search for a different location.</p>
+                <button onClick={clearFilters} className="mt-4 px-4 py-2 bg-[#4B5EAA] text-white rounded-xl text-sm font-semibold hover:bg-[#3D4D8C] transition-colors">
+                  Clear All Filters
+                </button>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {propertiesWithUnits.map(prop => {
+                {filteredProperties.map(prop => {
                   const owner = ownerDocs[prop.ownerId];
                   return (
                     <div key={prop.id} className="bg-white rounded-2xl border border-[#EAEAEA] overflow-hidden shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col h-full border-t-4 border-t-[#4B5EAA]">
