@@ -37,8 +37,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const [ownerDocs, setOwnerDocs] = useState<Record<string, User>>({});
 
   // Application Form States
-  const [applyAadhaar, setApplyAadhaar] = useState<string>(user.aadhaarNumber || '');
-  const [applyPhone, setApplyPhone] = useState<string>(user.phone || '');
+  const [applyIdProof, setApplyIdProof] = useState<File | null>(null);
+  const [applyAddressProof, setApplyAddressProof] = useState<File | null>(null);
+  const [applyProfilePhoto, setApplyProfilePhoto] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
   const [uploadError, setUploadError] = useState<string>('');
@@ -271,8 +272,13 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       return;
     }
 
-    if (!applyAadhaar || !applyPhone) {
-      alert('Aadhaar and Phone are required.');
+    if (!applyIdProof) {
+      alert('ID Proof is required.');
+      return;
+    }
+
+    if (applyIdProof.size > 5 * 1024 * 1024 || (applyAddressProof && applyAddressProof.size > 5 * 1024 * 1024) || (applyProfilePhoto && applyProfilePhoto.size > 5 * 1024 * 1024)) {
+      alert('File size exceeds 5MB limit.');
       return;
     }
 
@@ -280,15 +286,21 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     setUploadProgress('');
 
     try {
-      // Update user details if changed
-      const uQ = query(collection(db, 'users'), where('userId', '==', user.id));
-      const uSnap = await getDocs(uQ);
-      if (!uSnap.empty) {
-        await updateDoc(doc(db, 'users', uSnap.docs[0].id), { 
-          aadhaarNumber: applyAadhaar,
-          phone: applyPhone
-        });
-        await login({ ...user, aadhaarNumber: applyAadhaar, phone: applyPhone });
+      let idProofUrl = '';
+      let addressProofUrl = '';
+      let profilePhotoUrl = '';
+
+      if (applyIdProof) {
+        setUploadProgress('Uploading ID Proof...');
+        idProofUrl = await uploadImage(applyIdProof);
+      }
+      if (applyAddressProof) {
+        setUploadProgress('Uploading Address Proof...');
+        addressProofUrl = await uploadImage(applyAddressProof);
+      }
+      if (applyProfilePhoto) {
+        setUploadProgress('Uploading Profile Photo...');
+        profilePhotoUrl = await uploadImage(applyProfilePhoto);
       }
 
       setUploadProgress('📨 Submitting request...');
@@ -298,6 +310,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         selectedUnits: selectedUnits.map(u => u.unitId),
         totalRent: totalSelectedRent,
         depositAmount: selectedProperty.securityDeposit || 0,
+        idProofUrl,
+        addressProofUrl,
+        profilePhotoUrl,
         status: 'pending',
         createdAt: new Date().toISOString()
       });
@@ -305,8 +320,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       setIsApplyModalOpen(false);
       setSelectedProperty(null);
       setSelectedUnits([]);
-      setApplyAadhaar(user.aadhaarNumber || '');
-      setApplyPhone(user.phone || '');
+      setApplyIdProof(null);
+      setApplyAddressProof(null);
+      setApplyProfilePhoto(null);
       setUploadProgress('');
       setUploadError('');
 
@@ -855,30 +871,48 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               </div>
             )}
             <div className="bg-[#E3F2FD] p-4 rounded-xl border border-[#BBDEFB]">
-              <h4 className="font-bold text-[#1565C0] flex items-center gap-2 mb-1"><Icons.Users /> Details Required</h4>
-              <p className="text-xs text-[#1565C0] mb-4">Please enter your Aadhaar and Phone Number.</p>
+              <h4 className="font-bold text-[#1565C0] flex items-center gap-2 mb-1"><Icons.Docs /> Documents Required</h4>
+              <p className="text-xs text-[#1565C0] mb-4">Please upload your ID Proof to proceed. (Max 5MB)</p>
               <div className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-[#1565C0] mb-1">Aadhaar Number <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    required
-                    value={applyAadhaar}
-                    onChange={e => setApplyAadhaar(e.target.value)}
-                    className="w-full text-sm text-blue-800 bg-white border border-blue-200 rounded p-3"
-                    placeholder="Enter 12-digit Aadhaar Number"
-                  />
+                  <label className="block text-sm font-medium text-[#1565C0] mb-1">ID Proof (Aadhaar/PAN) <span className="text-red-500">*</span></label>
+                  <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
+                    <span className="bg-[#1565C0] text-white text-xs px-2 py-1 rounded shadow-sm shrink-0">Choose File</span>
+                    <span className="text-sm text-gray-500 truncate">{applyIdProof ? applyIdProof.name : 'No file chosen'}</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      required
+                      onChange={e => setApplyIdProof(e.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-[#1565C0] mb-1">Phone Number <span className="text-red-500">*</span></label>
-                  <input
-                    type="tel"
-                    required
-                    value={applyPhone}
-                    onChange={e => setApplyPhone(e.target.value)}
-                    className="w-full text-sm text-blue-800 bg-white border border-blue-200 rounded p-3"
-                    placeholder="Enter Phone Number"
-                  />
+                  <label className="block text-sm font-medium text-[#1565C0] mb-1">Address Proof (Optional)</label>
+                  <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
+                    <span className="bg-gray-200 text-gray-700 font-medium text-xs px-2 py-1 rounded shadow-sm shrink-0">Choose File</span>
+                    <span className="text-sm text-gray-500 truncate">{applyAddressProof ? applyAddressProof.name : 'No file chosen'}</span>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      onChange={e => setApplyAddressProof(e.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-[#1565C0] mb-1">Profile Photo (Optional)</label>
+                  <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
+                    <span className="bg-gray-200 text-gray-700 font-medium text-xs px-2 py-1 rounded shadow-sm shrink-0">Choose File</span>
+                    <span className="text-sm text-gray-500 truncate">{applyProfilePhoto ? applyProfilePhoto.name : 'No file chosen'}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={e => setApplyProfilePhoto(e.target.files?.[0] || null)}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
               </div>
             </div>
@@ -915,7 +949,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               <Button type="button" variant="outline" onClick={() => { setIsApplyModalOpen(false); setUploadError(''); }} fullWidth className="py-3 font-semibold">Cancel</Button>
               <Button
                 type="submit"
-                disabled={isSubmitting || selectedUnits.length === 0 || !applyAadhaar || !applyPhone}
+                disabled={isSubmitting || selectedUnits.length === 0 || !applyIdProof}
                 fullWidth
                 className="py-3 font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
               >

@@ -110,6 +110,9 @@ export interface InterestRequest {
   depositAmount?: number;
   selectedUnits?: string[];
   totalRent?: number;
+  idProofUrl?: string;
+  addressProofUrl?: string;
+  profilePhotoUrl?: string;
 }
 
 export interface ManualTenant {

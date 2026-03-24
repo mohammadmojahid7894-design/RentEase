@@ -1099,10 +1099,12 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                           <div className="mt-4 bg-[#F9F8F6] p-4 rounded-xl border border-gray-200">
                             <p className="font-semibold text-gray-800">Tenant: {tenant.name}</p>
                             <p className="text-sm text-gray-600">Phone: {tenant.phone}</p>
-                            <div className="mt-3 flex gap-3 text-sm">
-                              <a href={tenant.documents?.aadhaarUrl || '#'} target="_blank" rel="noreferrer" className="text-[#1565C0] underline font-medium">Aadhaar Card</a>
-                              <a href={tenant.documents?.idProofUrl || '#'} target="_blank" rel="noreferrer" className="text-[#1565C0] underline font-medium">ID Proof</a>
-                              <a href={tenant.documents?.profilePhotoUrl || '#'} target="_blank" rel="noreferrer" className="text-[#1565C0] underline font-medium">Photo</a>
+                            <div className="mt-3 flex gap-3 text-sm flex-wrap">
+                              {req.idProofUrl && <a href={req.idProofUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors"><Icons.Docs className="inline w-3 h-3 mr-1" />App: ID Proof</a>}
+                              {req.addressProofUrl && <a href={req.addressProofUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors"><Icons.Docs className="inline w-3 h-3 mr-1" />App: Address Proof</a>}
+                              {req.profilePhotoUrl && <a href={req.profilePhotoUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors"><Icons.Users className="inline w-3 h-3 mr-1" />App: Photo</a>}
+                              {tenant.documents?.aadhaarUrl && <a href={tenant.documents.aadhaarUrl} target="_blank" rel="noreferrer" className="text-gray-600 underline font-medium">Base: Aadhaar</a>}
+                              {tenant.documents?.idProofUrl && <a href={tenant.documents.idProofUrl} target="_blank" rel="noreferrer" className="text-gray-600 underline font-medium">Base: ID Proof</a>}
                             </div>
                             {req.depositAmount ? <p className="text-sm text-green-700 mt-2 font-semibold border-t pt-2">Agreed to deposit: ₹{req.depositAmount}</p> : null}
                           </div>
