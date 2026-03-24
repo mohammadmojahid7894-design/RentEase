@@ -30,7 +30,8 @@ export enum ComplaintStatus {
 export enum RentRecordStatus {
   PENDING = 'pending',
   PAID = 'paid',
-  LATE = 'late'
+  LATE = 'late',
+  OVERDUE = 'overdue'
 }
 
 export enum ComplaintPriority {
@@ -194,8 +195,15 @@ export interface RentRecord {
   month: string;
   rentAmount: number;
   dueDate: string;
-  status: 'pending' | 'paid' | 'late';
+  status: 'pending' | 'paid' | 'late' | 'overdue';
   paymentDate?: string;
+  lateFee: number;
+  lateFeePerDay: number;
+  rentStartDate?: string;
+  nextDueDate?: string;
+  reminderSent5?: boolean;
+  reminderSent2?: boolean;
+  reminderSentDue?: boolean;
   createdAt: string;
 }
 

@@ -4,6 +4,7 @@ import { User, Property, InterestRequest, PropertyUnit, RentNotice, AppNotificat
 import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
 import { uploadImage } from '../cloudinary';
+import { createFirstRentRecord, createNextCycleRecord, processRentCycles, getDaysOverdue, calculateLateFee } from '../utils/rentCycle';
 import { Icons } from '../constants';
 import Button from './Button';
 import Layout from './Layout';
@@ -37,9 +38,12 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const [ownerDocs, setOwnerDocs] = useState<Record<string, User>>({});
 
   // Application Form States
-  const [applyIdProof, setApplyIdProof] = useState<File | null>(null);
-  const [applyAddressProof, setApplyAddressProof] = useState<File | null>(null);
-  const [applyProfilePhoto, setApplyProfilePhoto] = useState<File | null>(null);
+  const [applyIdProofUrl, setApplyIdProofUrl] = useState<string>('');
+  const [applyAddressProofUrl, setApplyAddressProofUrl] = useState<string>('');
+  const [applyProfilePhotoUrl, setApplyProfilePhotoUrl] = useState<string>('');
+  const [isUploadingId, setIsUploadingId] = useState(false);
+  const [isUploadingAddress, setIsUploadingAddress] = useState(false);
+  const [isUploadingProfile, setIsUploadingProfile] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [uploadProgress, setUploadProgress] = useState<string>('');
   const [uploadError, setUploadError] = useState<string>('');
@@ -176,12 +180,15 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     return () => unsub();
   }, [user.id]);
 
-  // Fetch My Rent Records
+  // Fetch My Rent Records + process overdue/reminders
   useEffect(() => {
     if (!user.id) return;
     const q = query(collection(db, 'rentRecords'), where('tenantId', '==', user.id));
-    const unsub = onSnapshot(q, snap => {
-      setMyRentRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as RentRecord)).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
+    const unsub = onSnapshot(q, async snap => {
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() } as RentRecord)).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setMyRentRecords(records);
+      // Process overdue & reminders (client-side check)
+      await processRentCycles(user.id).catch(console.error);
     });
     return () => unsub();
   }, [user.id]);
@@ -264,6 +271,42 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     return await uploadImage(file);
   };
 
+  const handleIdProofUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('File size exceeds 5MB limit.'); return; }
+    setIsUploadingId(true);
+    try {
+      const url = await uploadImage(file);
+      setApplyIdProofUrl(url);
+    } catch (err) { console.error(err); alert('Upload failed'); }
+    setIsUploadingId(false);
+  };
+
+  const handleAddressProofUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('File size exceeds 5MB limit.'); return; }
+    setIsUploadingAddress(true);
+    try {
+      const url = await uploadImage(file);
+      setApplyAddressProofUrl(url);
+    } catch (err) { console.error(err); alert('Upload failed'); }
+    setIsUploadingAddress(false);
+  };
+
+  const handleProfilePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { alert('File size exceeds 5MB limit.'); return; }
+    setIsUploadingProfile(true);
+    try {
+      const url = await uploadImage(file);
+      setApplyProfilePhotoUrl(url);
+    } catch (err) { console.error(err); alert('Upload failed'); }
+    setIsUploadingProfile(false);
+  };
+
   // ── Submit request ─────────────────────────────────
   const handleSubmitRequest = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -272,13 +315,8 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       return;
     }
 
-    if (!applyIdProof) {
+    if (!applyIdProofUrl) {
       alert('ID Proof is required.');
-      return;
-    }
-
-    if (applyIdProof.size > 5 * 1024 * 1024 || (applyAddressProof && applyAddressProof.size > 5 * 1024 * 1024) || (applyProfilePhoto && applyProfilePhoto.size > 5 * 1024 * 1024)) {
-      alert('File size exceeds 5MB limit.');
       return;
     }
 
@@ -286,23 +324,6 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     setUploadProgress('');
 
     try {
-      let idProofUrl = '';
-      let addressProofUrl = '';
-      let profilePhotoUrl = '';
-
-      if (applyIdProof) {
-        setUploadProgress('Uploading ID Proof...');
-        idProofUrl = await uploadImage(applyIdProof);
-      }
-      if (applyAddressProof) {
-        setUploadProgress('Uploading Address Proof...');
-        addressProofUrl = await uploadImage(applyAddressProof);
-      }
-      if (applyProfilePhoto) {
-        setUploadProgress('Uploading Profile Photo...');
-        profilePhotoUrl = await uploadImage(applyProfilePhoto);
-      }
-
       setUploadProgress('📨 Submitting request...');
       await addDoc(collection(db, 'requests'), {
         tenantId: user.id,
@@ -310,9 +331,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         selectedUnits: selectedUnits.map(u => u.unitId),
         totalRent: totalSelectedRent,
         depositAmount: selectedProperty.securityDeposit || 0,
-        idProofUrl,
-        addressProofUrl,
-        profilePhotoUrl,
+        idProofUrl: applyIdProofUrl,
+        addressProofUrl: applyAddressProofUrl,
+        profilePhotoUrl: applyProfilePhotoUrl,
         status: 'pending',
         createdAt: new Date().toISOString()
       });
@@ -320,9 +341,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       setIsApplyModalOpen(false);
       setSelectedProperty(null);
       setSelectedUnits([]);
-      setApplyIdProof(null);
-      setApplyAddressProof(null);
-      setApplyProfilePhoto(null);
+      setApplyIdProofUrl('');
+      setApplyAddressProofUrl('');
+      setApplyProfilePhotoUrl('');
       setUploadProgress('');
       setUploadError('');
 
@@ -431,6 +452,14 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       setLastTxData({ id: transactionId, method, amount, month: 'Initial Security & Rent' });
       setIsPaymentSuccessOpen(true);
       setSelectedRequestToPay(null);
+
+      // Create first rent record for next month's cycle
+      await createFirstRentRecord(
+        user.id,
+        selectedRequestToPay.propertyId,
+        selectedRequestToPay.totalRent || amount,
+        selectedRequestToPay.selectedUnits
+      ).catch(console.error);
     } catch (err) {
       console.error(err);
       alert('Payment failed. Please try again.');
@@ -520,6 +549,20 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       setLastTxData({ id: transactionId, method, amount: selectedNotice.rentAmount, month: selectedNotice.month });
       setIsPaymentSuccessOpen(true);
       setSelectedNotice(null);
+
+      // Auto-create next cycle rent record
+      const matchingRecord = myRentRecords.find(
+        r => r.propertyId === selectedNotice.propertyId && r.month === selectedNotice.month
+      );
+      if (matchingRecord) {
+        await createNextCycleRecord(
+          user.id,
+          selectedNotice.propertyId,
+          matchingRecord.rentAmount,
+          matchingRecord.dueDate,
+          matchingRecord.unitId
+        ).catch(console.error);
+      }
     } catch (err) {
       console.error(err);
       alert('Payment failed. Please try again.');
@@ -836,7 +879,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         )}
 
         {/* Apply / Unit Selection Modal */}
-        <Modal isOpen={isApplyModalOpen} onClose={() => { setIsApplyModalOpen(false); setSelectedProperty(null); setSelectedUnits([]); }} title="Select Units & Apply">
+        <Modal isOpen={isApplyModalOpen} onClose={() => { setIsApplyModalOpen(false); setSelectedProperty(null); setSelectedUnits([]); setApplyIdProofUrl(''); setApplyAddressProofUrl(''); setApplyProfilePhotoUrl(''); }} title="Select Units & Apply">
           <form onSubmit={handleSubmitRequest} className="space-y-5 max-h-[80vh] overflow-y-auto px-1 pb-1">
             <div className="bg-gray-50 p-4 rounded-xl border border-gray-200">
               <p className="font-bold text-lg text-[#2D3436]">{selectedProperty?.propertyTitle}</p>
@@ -876,43 +919,60 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-[#1565C0] mb-1">ID Proof (Aadhaar/PAN) <span className="text-red-500">*</span></label>
-                  <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
-                    <span className="bg-[#1565C0] text-white text-xs px-2 py-1 rounded shadow-sm shrink-0">Choose File</span>
-                    <span className="text-sm text-gray-500 truncate">{applyIdProof ? applyIdProof.name : 'No file chosen'}</span>
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      required
-                      onChange={e => setApplyIdProof(e.target.files?.[0] || null)}
-                      className="hidden"
-                    />
-                  </label>
+                  {!applyIdProofUrl && !isUploadingId && (
+                    <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
+                      <span className="bg-[#1565C0] text-white text-xs px-2 py-1 rounded shadow-sm shrink-0">Upload ID Proof</span>
+                      <span className="text-sm text-gray-500 truncate">No file chosen</span>
+                      <input type="file" accept="image/*,application/pdf" onChange={handleIdProofUpload} className="hidden" />
+                    </label>
+                  )}
+                  {isUploadingId && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-sm text-[#1565C0] font-semibold"><span className="animate-spin h-4 w-4 border-2 border-[#1565C0] border-t-transparent rounded-full shrink-0"></span> Uploading...</div>
+                  )}
+                  {applyIdProofUrl && (
+                    <div className="flex items-center justify-between px-3 py-2 bg-green-50 border border-green-200 rounded">
+                      <a href={applyIdProofUrl} target="_blank" rel="noreferrer" className="text-sm text-green-700 font-semibold hover:underline">View Uploaded ID Proof</a>
+                      <button type="button" onClick={() => setApplyIdProofUrl('')} className="text-xs text-red-500 font-bold ml-2">Remove</button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-[#1565C0] mb-1">Address Proof (Optional)</label>
-                  <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
-                    <span className="bg-gray-200 text-gray-700 font-medium text-xs px-2 py-1 rounded shadow-sm shrink-0">Choose File</span>
-                    <span className="text-sm text-gray-500 truncate">{applyAddressProof ? applyAddressProof.name : 'No file chosen'}</span>
-                    <input
-                      type="file"
-                      accept="image/*,application/pdf"
-                      onChange={e => setApplyAddressProof(e.target.files?.[0] || null)}
-                      className="hidden"
-                    />
-                  </label>
+                  {!applyAddressProofUrl && !isUploadingAddress && (
+                    <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
+                      <span className="bg-gray-200 text-gray-700 font-medium text-xs px-2 py-1 rounded shadow-sm shrink-0">Upload Address Proof</span>
+                      <span className="text-sm text-gray-500 truncate">No file chosen</span>
+                      <input type="file" accept="image/*,application/pdf" onChange={handleAddressProofUpload} className="hidden" />
+                    </label>
+                  )}
+                  {isUploadingAddress && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-sm text-[#1565C0] font-semibold"><span className="animate-spin h-4 w-4 border-2 border-[#1565C0] border-t-transparent rounded-full shrink-0"></span> Uploading...</div>
+                  )}
+                  {applyAddressProofUrl && (
+                    <div className="flex items-center justify-between px-3 py-2 bg-green-50 border border-green-200 rounded">
+                      <a href={applyAddressProofUrl} target="_blank" rel="noreferrer" className="text-sm text-green-700 font-semibold hover:underline">View Address Proof</a>
+                      <button type="button" onClick={() => setApplyAddressProofUrl('')} className="text-xs text-red-500 font-bold ml-2">Remove</button>
+                    </div>
+                  )}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-[#1565C0] mb-1">Profile Photo (Optional)</label>
-                  <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
-                    <span className="bg-gray-200 text-gray-700 font-medium text-xs px-2 py-1 rounded shadow-sm shrink-0">Choose File</span>
-                    <span className="text-sm text-gray-500 truncate">{applyProfilePhoto ? applyProfilePhoto.name : 'No file chosen'}</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={e => setApplyProfilePhoto(e.target.files?.[0] || null)}
-                      className="hidden"
-                    />
-                  </label>
+                  {!applyProfilePhotoUrl && !isUploadingProfile && (
+                    <label className="flex items-center gap-2 px-3 py-2 bg-white border border-blue-200 rounded cursor-pointer hover:bg-blue-50 transition-colors w-full">
+                      <span className="bg-gray-200 text-gray-700 font-medium text-xs px-2 py-1 rounded shadow-sm shrink-0">Upload Profile Photo</span>
+                      <span className="text-sm text-gray-500 truncate">No file chosen</span>
+                      <input type="file" accept="image/*" onChange={handleProfilePhotoUpload} className="hidden" />
+                    </label>
+                  )}
+                  {isUploadingProfile && (
+                    <div className="flex items-center gap-2 px-3 py-2 bg-blue-50 border border-blue-200 rounded text-sm text-[#1565C0] font-semibold"><span className="animate-spin h-4 w-4 border-2 border-[#1565C0] border-t-transparent rounded-full shrink-0"></span> Uploading...</div>
+                  )}
+                  {applyProfilePhotoUrl && (
+                    <div className="flex items-center justify-between px-3 py-2 bg-green-50 border border-green-200 rounded">
+                      <a href={applyProfilePhotoUrl} target="_blank" rel="noreferrer" className="text-sm text-green-700 font-semibold hover:underline">View Profile Photo</a>
+                      <button type="button" onClick={() => setApplyProfilePhotoUrl('')} className="text-xs text-red-500 font-bold ml-2">Remove</button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -949,7 +1009,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               <Button type="button" variant="outline" onClick={() => { setIsApplyModalOpen(false); setUploadError(''); }} fullWidth className="py-3 font-semibold">Cancel</Button>
               <Button
                 type="submit"
-                disabled={isSubmitting || selectedUnits.length === 0 || !applyIdProof}
+                disabled={isSubmitting || selectedUnits.length === 0 || !applyIdProofUrl || isUploadingId || isUploadingAddress || isUploadingProfile}
                 fullWidth
                 className="py-3 font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all"
               >
@@ -1037,7 +1097,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
             <h3 className="text-2xl font-bold">My Rent Status</h3>
 
             {/* Summary Cards */}
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="bg-yellow-50 border border-yellow-200 p-4 rounded-2xl text-center">
                 <p className="text-xs font-semibold text-yellow-600 uppercase tracking-wider mb-1">Pending</p>
                 <p className="text-2xl font-bold text-yellow-700">{myRentRecords.filter(r => r.status === 'pending').length}</p>
@@ -1048,69 +1108,96 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               </div>
               <div className="bg-red-50 border border-red-200 p-4 rounded-2xl text-center">
                 <p className="text-xs font-semibold text-red-600 uppercase tracking-wider mb-1">Overdue</p>
-                <p className="text-2xl font-bold text-red-700">{myRentRecords.filter(r => r.status === 'late').length}</p>
+                <p className="text-2xl font-bold text-red-700">{myRentRecords.filter(r => r.status === 'overdue' || r.status === 'late').length}</p>
+              </div>
+              <div className="bg-purple-50 border border-purple-200 p-4 rounded-2xl text-center">
+                <p className="text-xs font-semibold text-purple-600 uppercase tracking-wider mb-1">Total Late Fees</p>
+                <p className="text-2xl font-bold text-purple-700">₹{myRentRecords.reduce((sum, r) => sum + (r.lateFee || 0), 0).toLocaleString('en-IN')}</p>
               </div>
             </div>
 
             {myRentRecords.length === 0 ? (
               <div className="text-center p-12 bg-white rounded-2xl border border-dashed border-[#EAEAEA]">
-                <p className="text-lg text-gray-500">No rent records yet. Your owner will generate them monthly.</p>
+                <p className="text-lg text-gray-500">No rent records yet. Records are auto-created after your first property payment.</p>
               </div>
             ) : (
               <div className="space-y-3">
                 <h4 className="font-bold text-gray-700">All Rent Records</h4>
-                <div className="bg-white rounded-2xl border border-[#EAEAEA] overflow-hidden shadow-sm">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-gray-50 border-b border-[#EAEAEA]">
-                          <th className="text-left p-3 text-xs font-semibold text-gray-500 uppercase">Month</th>
-                          <th className="text-left p-3 text-xs font-semibold text-gray-500 uppercase">Amount</th>
-                          <th className="text-left p-3 text-xs font-semibold text-gray-500 uppercase">Due Date</th>
-                          <th className="text-left p-3 text-xs font-semibold text-gray-500 uppercase">Status</th>
-                          <th className="text-right p-3 text-xs font-semibold text-gray-500 uppercase">Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {myRentRecords.map(rec => (
-                          <tr key={rec.id} className="border-b border-[#EAEAEA] hover:bg-gray-50">
-                            <td className="p-3 font-medium text-gray-800">{rec.month}</td>
-                            <td className="p-3 font-bold text-[#4B5EAA]">₹{rec.rentAmount.toLocaleString('en-IN')}</td>
-                            <td className="p-3 text-gray-600">{rec.dueDate}</td>
-                            <td className="p-3">
-                              <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${rec.status === 'paid' ? 'bg-green-100 text-green-700' : rec.status === 'late' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{rec.status}</span>
-                            </td>
-                            <td className="p-3 text-right">
-                              {rec.status !== 'paid' && (
-                                <Button 
-                                  variant="primary" 
-                                  className="!px-3 !py-1 !text-xs" 
-                                  onClick={() => { 
-                                    const prop = allProperties.find(p => p.id === rec.propertyId);
-                                    setSelectedNotice({
-                                      id: `record_${rec.id}`, // dummy id because we don't have a notice id
-                                      tenantId: rec.tenantId,
-                                      propertyId: rec.propertyId,
-                                      ownerId: prop?.ownerId || '',
-                                      month: rec.month,
-                                      rentAmount: rec.rentAmount,
-                                      dueDate: rec.dueDate,
-                                      status: 'pending',
-                                      message: 'Rent Record Payment',
-                                      createdAt: new Date().toISOString()
-                                    } as any); 
-                                    setIsPayModalOpen(true); 
-                                  }}
-                                >
-                                  Pay
-                                </Button>
+                <div className="space-y-3">
+                  {myRentRecords.map(rec => {
+                    const prop = allProperties.find(p => p.id === rec.propertyId);
+                    const isOverdue = rec.status === 'overdue' || rec.status === 'late';
+                    const daysOver = isOverdue ? getDaysOverdue(rec.dueDate) : 0;
+                    const currentLateFee = isOverdue ? calculateLateFee(rec.dueDate, rec.lateFeePerDay || 100) : 0;
+                    const totalDue = rec.rentAmount + currentLateFee;
+
+                    return (
+                      <div key={rec.id} className={`bg-white p-5 rounded-2xl border shadow-sm transition-all ${
+                        isOverdue ? 'border-red-300 border-l-4 border-l-red-500 bg-red-50/30' :
+                        rec.status === 'paid' ? 'border-green-200' :
+                        'border-yellow-200 border-l-4 border-l-yellow-400'
+                      }`}>
+                        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${
+                                rec.status === 'paid' ? 'bg-green-100 text-green-700' :
+                                isOverdue ? 'bg-red-100 text-red-700' :
+                                'bg-yellow-100 text-yellow-700'
+                              }`}>{isOverdue ? 'OVERDUE' : rec.status}</span>
+                              {isOverdue && daysOver > 0 && (
+                                <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">{daysOver} day{daysOver > 1 ? 's' : ''} late</span>
                               )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                              <span className="text-xs text-gray-400">{new Date(rec.dueDate).toLocaleDateString()}</span>
+                            </div>
+                            <p className="font-bold text-gray-800">{prop?.propertyTitle || 'Property'}</p>
+                            <p className="text-sm text-gray-600 mt-1">Month: <strong>{rec.month}</strong> | Due: <strong>{new Date(rec.dueDate).toLocaleDateString()}</strong></p>
+                            {rec.nextDueDate && rec.status === 'paid' && (
+                              <p className="text-xs text-blue-600 mt-1">Next due: {new Date(rec.nextDueDate).toLocaleDateString()}</p>
+                            )}
+                            {isOverdue && currentLateFee > 0 && (
+                              <p className="text-sm text-red-700 font-semibold mt-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-200">
+                                ⚠️ Late Fee: ₹{currentLateFee.toLocaleString('en-IN')} (₹{rec.lateFeePerDay || 100}/day × {daysOver} days)
+                              </p>
+                            )}
+                            {rec.paymentDate && <p className="text-xs text-green-600 mt-1">Paid on: {new Date(rec.paymentDate).toLocaleDateString()}</p>}
+                          </div>
+                          <div className="text-right flex flex-col items-end gap-2">
+                            <p className={`text-2xl font-bold ${isOverdue ? 'text-red-600' : 'text-[#4B5EAA]'}`}>
+                              ₹{(isOverdue ? totalDue : rec.rentAmount).toLocaleString('en-IN')}
+                            </p>
+                            {isOverdue && (
+                              <span className="text-xs text-gray-500">(Rent: ₹{rec.rentAmount.toLocaleString('en-IN')} + Fee: ₹{currentLateFee.toLocaleString('en-IN')})</span>
+                            )}
+                            {rec.status !== 'paid' && (
+                              <Button 
+                                variant="primary" 
+                                className={`!px-4 !py-2 !text-sm ${isOverdue ? '!bg-red-600 hover:!bg-red-700' : ''}`}
+                                onClick={() => { 
+                                  const findProp = allProperties.find(p => p.id === rec.propertyId);
+                                  setSelectedNotice({
+                                    id: `record_${rec.id}`,
+                                    tenantId: rec.tenantId,
+                                    propertyId: rec.propertyId,
+                                    ownerId: findProp?.ownerId || '',
+                                    month: rec.month,
+                                    rentAmount: isOverdue ? totalDue : rec.rentAmount,
+                                    dueDate: rec.dueDate,
+                                    status: 'pending',
+                                    message: isOverdue ? `Overdue Rent + Late Fee` : 'Rent Payment',
+                                    createdAt: new Date().toISOString()
+                                  } as any); 
+                                  setIsPayModalOpen(true); 
+                                }}
+                              >
+                                {isOverdue ? `Pay ₹${totalDue.toLocaleString('en-IN')}` : 'Pay Rent'}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* Payment History from rent_payments */}

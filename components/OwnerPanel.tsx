@@ -4,6 +4,7 @@ import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot, orderBy, deleteDoc } from 'firebase/firestore';
 import { uploadImage } from "../cloudinary";
 import { useAuth } from '../contexts/AuthContext';
+import { getDaysOverdue, calculateLateFee } from '../utils/rentCycle';
 import { Icons } from '../constants';
 import Button from './Button';
 import Layout from './Layout';
@@ -107,7 +108,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
 
   // ── Financial Summary ─────────────────────────────────────────────────────
   const [financialStats, setFinancialStats] = useState({
-    totalMonthlyRent: 0, totalPaid: 0, totalPending: 0, totalLate: 0, lateCount: 0
+    totalMonthlyRent: 0, totalPaid: 0, totalPending: 0, totalLate: 0, lateCount: 0, totalLateFees: 0, overdueCount: 0
   });
 
   // ── Occupied tenants map (for notice form dropdown) ───────────────────────
@@ -240,24 +241,15 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         // Check for late payments
         const now = new Date();
         chunkData.forEach(async rec => {
-          if (rec.status === 'pending') {
+          if (rec.status === 'pending' || rec.status === 'late') {
             const due = new Date(rec.dueDate);
-            const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-            if (diffDays <= 0 && rec.id) {
-              await updateDoc(doc(db, 'rentRecords', rec.id), { status: 'late' });
-              await addDoc(collection(db, 'notifications'), {
-                userId: rec.tenantId,
-                type: 'alert',
-                message: `⚠️ Your rent payment of ₹${rec.rentAmount} for ${rec.month} is overdue. Please pay immediately.`,
-                status: 'unread',
-                createdAt: new Date().toISOString()
-              });
-              await addDoc(collection(db, 'notifications'), {
-                userId: user.id,
-                type: 'alert',
-                message: `Late payment: Tenant's rent of ₹${rec.rentAmount} for ${rec.month} is overdue.`,
-                status: 'unread',
-                createdAt: new Date().toISOString()
+            const now = new Date();
+            if (now > due && rec.id) {
+              const daysOver = getDaysOverdue(rec.dueDate);
+              const lateFee = calculateLateFee(rec.dueDate, rec.lateFeePerDay || 100);
+              await updateDoc(doc(db, 'rentRecords', rec.id), { 
+                status: 'overdue',
+                lateFee
               });
             }
           }
@@ -278,10 +270,13 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     // Wait, rentRecords handles this cleanly now since payment modal syncs the two.
     const totalPaid = rentRecords.filter(r => r.status === 'paid').reduce((s, r) => s + r.rentAmount, 0);
     const totalPending = rentRecords.filter(r => r.status === 'pending').reduce((s, r) => s + r.rentAmount, 0);
-    const totalLate = rentRecords.filter(r => r.status === 'late').reduce((s, r) => s + r.rentAmount, 0);
-    const lateCount = rentRecords.filter(r => r.status === 'late').length;
+    const overdueRecords = rentRecords.filter(r => r.status === 'overdue' || r.status === 'late');
+    const totalLate = overdueRecords.reduce((s, r) => s + r.rentAmount, 0);
+    const lateCount = overdueRecords.length;
+    const totalLateFees = overdueRecords.reduce((s, r) => s + (r.lateFee || 0), 0);
+    const overdueCount = overdueRecords.length;
 
-    setFinancialStats({ totalMonthlyRent, totalPaid, totalPending, totalLate, lateCount });
+    setFinancialStats({ totalMonthlyRent, totalPaid, totalPending, totalLate, lateCount, totalLateFees, overdueCount });
   }, [rentRecords, ownerStats.totalMonthlyRentConfigured]);
 
 
@@ -750,6 +745,11 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         rentAmount: Number(genRecordForm.rentAmount),
         dueDate: genRecordForm.dueDate,
         status: 'pending',
+        lateFee: 0,
+        lateFeePerDay: 100,
+        reminderSent5: false,
+        reminderSent2: false,
+        reminderSentDue: false,
         createdAt: new Date().toISOString()
       };
       await addDoc(collection(db, 'rentRecords'), recordData);
@@ -1100,17 +1100,25 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                             <p className="font-semibold text-gray-800">Tenant: {tenant.name}</p>
                             <p className="text-sm text-gray-600">Phone: {tenant.phone}</p>
                             <div className="mt-3 flex gap-3 text-sm flex-wrap">
-                              {req.idProofUrl && <a href={req.idProofUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors"><Icons.Docs className="inline w-3 h-3 mr-1" />App: ID Proof</a>}
-                              {req.addressProofUrl && <a href={req.addressProofUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors"><Icons.Docs className="inline w-3 h-3 mr-1" />App: Address Proof</a>}
-                              {req.profilePhotoUrl && <a href={req.profilePhotoUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors"><Icons.Users className="inline w-3 h-3 mr-1" />App: Photo</a>}
+                              {req.idProofUrl && <a href={req.idProofUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors">📄 ID Proof</a>}
+                              {req.addressProofUrl && <a href={req.addressProofUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors">📄 Address Proof</a>}
+                              {req.profilePhotoUrl && <a href={req.profilePhotoUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors">📷 Photo</a>}
                               {tenant.documents?.aadhaarUrl && <a href={tenant.documents.aadhaarUrl} target="_blank" rel="noreferrer" className="text-gray-600 underline font-medium">Base: Aadhaar</a>}
                               {tenant.documents?.idProofUrl && <a href={tenant.documents.idProofUrl} target="_blank" rel="noreferrer" className="text-gray-600 underline font-medium">Base: ID Proof</a>}
                             </div>
                             {req.depositAmount ? <p className="text-sm text-green-700 mt-2 font-semibold border-t pt-2">Agreed to deposit: ₹{req.depositAmount}</p> : null}
                           </div>
                         ) : (
-                          <div className="mt-4 bg-gray-50 p-4 rounded-xl border border-gray-200 text-sm text-gray-500">
-                            Wait for user details or user manually added...
+                          <div className="mt-4 bg-gray-50 p-4 rounded-xl border border-gray-200">
+                            <p className="text-sm text-gray-500 mb-2">Tenant details loading or manually added...</p>
+                            {(req.idProofUrl || req.addressProofUrl || req.profilePhotoUrl) && (
+                              <div className="flex gap-3 text-sm flex-wrap mt-2">
+                                {req.idProofUrl && <a href={req.idProofUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors">📄 ID Proof</a>}
+                                {req.addressProofUrl && <a href={req.addressProofUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors">📄 Address Proof</a>}
+                                {req.profilePhotoUrl && <a href={req.profilePhotoUrl} target="_blank" rel="noreferrer" className="text-[#4B5EAA] bg-[#EEF2FF] px-2 py-1 rounded-md font-medium border border-[#C7D2FE] hover:bg-[#E0E7FF] transition-colors">📷 Photo</a>}
+                              </div>
+                            )}
+                            {req.depositAmount ? <p className="text-sm text-green-700 mt-2 font-semibold border-t pt-2">Agreed to deposit: ₹{req.depositAmount}</p> : null}
                           </div>
                         )}
                       </div>
@@ -1327,10 +1335,21 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <h3 className="text-2xl font-bold">Monthly Rent Records</h3>
               <Button onClick={() => setIsGenRecordModalOpen(true)} variant="primary" className="!px-4 !py-2 !text-sm">+ Generate Record</Button>
             </div>
+
+            {/* Overdue Summary Banner */}
+            {financialStats.overdueCount > 0 && (
+              <div className="bg-red-50 border border-red-200 p-4 rounded-2xl flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                <div>
+                  <p className="font-bold text-red-700">⚠️ {financialStats.overdueCount} Overdue Record{financialStats.overdueCount > 1 ? 's' : ''}</p>
+                  <p className="text-sm text-red-600">Total overdue rent: ₹{financialStats.totalLate.toLocaleString('en-IN')} | Total late fees: ₹{financialStats.totalLateFees.toLocaleString('en-IN')}</p>
+                </div>
+              </div>
+            )}
+
             {rentRecords.length === 0 ? (
               <div className="text-center p-12 bg-white rounded-2xl border border-dashed border-[#EAEAEA]">
                 <p className="text-lg text-gray-500">No rent records generated yet.</p>
-                <p className="text-sm text-gray-400 mt-1">Click "Generate Record" to create monthly rent records for tenants.</p>
+                <p className="text-sm text-gray-400 mt-1">Records are auto-created when tenants make their first payment, or click "Generate Record" manually.</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -1338,25 +1357,69 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                   const prop = properties.find(p => p.id === rec.propertyId);
                   const tnt = (tenants[rec.tenantId] || manualTenants[rec.tenantId]) as any;
                   const tntName = tnt ? (tnt.tenantName || tnt.name || 'Tenant') : rec.tenantId.substring(0, 8);
+                  const isOverdue = rec.status === 'overdue' || rec.status === 'late';
+                  const daysOver = isOverdue ? getDaysOverdue(rec.dueDate) : 0;
+                  const currentLateFee = isOverdue ? calculateLateFee(rec.dueDate, rec.lateFeePerDay || 100) : 0;
+
                   return (
-                    <div key={rec.id} className={`bg-white p-5 rounded-2xl border shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${rec.status === 'late' ? 'border-red-200 border-l-4 border-l-red-500' : rec.status === 'paid' ? 'border-green-200' : 'border-yellow-200 border-l-4 border-l-yellow-400'}`}>
+                    <div key={rec.id} className={`bg-white p-5 rounded-2xl border shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
+                      isOverdue ? 'border-red-300 border-l-4 border-l-red-500 bg-red-50/30' :
+                      rec.status === 'paid' ? 'border-green-200' :
+                      'border-yellow-200 border-l-4 border-l-yellow-400'
+                    }`}>
                       <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${rec.status === 'paid' ? 'bg-green-100 text-green-700' : rec.status === 'late' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{rec.status}</span>
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${
+                            rec.status === 'paid' ? 'bg-green-100 text-green-700' :
+                            isOverdue ? 'bg-red-100 text-red-700' :
+                            'bg-yellow-100 text-yellow-700'
+                          }`}>{isOverdue ? 'OVERDUE' : rec.status}</span>
+                          {isOverdue && daysOver > 0 && (
+                            <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">{daysOver} day{daysOver > 1 ? 's' : ''} late</span>
+                          )}
                           <span className="text-xs text-gray-400">{new Date(rec.createdAt).toLocaleDateString()}</span>
                         </div>
                         <p className="font-bold text-gray-800">{prop?.propertyTitle || 'Property'}</p>
                         <p className="text-sm text-gray-500">Tenant: <span className="font-semibold text-gray-700">{tntName}</span></p>
-                        <p className="text-sm text-gray-600 mt-1">Month: <strong>{rec.month}</strong> | Due: <strong>{rec.dueDate}</strong></p>
+                        <p className="text-sm text-gray-600 mt-1">Month: <strong>{rec.month}</strong> | Due: <strong>{new Date(rec.dueDate).toLocaleDateString()}</strong></p>
+                        {isOverdue && currentLateFee > 0 && (
+                          <p className="text-sm text-red-700 font-semibold mt-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-200">
+                            Late Fee: ₹{currentLateFee.toLocaleString('en-IN')} (₹{rec.lateFeePerDay || 100}/day × {daysOver} days)
+                          </p>
+                        )}
                         {rec.paymentDate && <p className="text-xs text-green-600 mt-1">Paid on: {new Date(rec.paymentDate).toLocaleDateString()}</p>}
                       </div>
                       <div className="text-right flex flex-col items-end gap-2">
-                        <p className="text-2xl font-bold text-[#4B5EAA]">₹{rec.rentAmount.toLocaleString('en-IN')}</p>
-                        {rec.status !== 'paid' && (
-                          <Button variant="outline" className="!px-3 !py-1.5 !text-xs !bg-green-50 !border-green-200 !text-green-700 font-semibold" onClick={() => handleMarkRentPaid(rec)}>
-                            Mark as Paid
-                          </Button>
+                        <p className={`text-2xl font-bold ${isOverdue ? 'text-red-600' : 'text-[#4B5EAA]'}`}>
+                          ₹{(isOverdue ? (rec.rentAmount + currentLateFee) : rec.rentAmount).toLocaleString('en-IN')}
+                        </p>
+                        {isOverdue && (
+                          <span className="text-xs text-gray-500">(Rent: ₹{rec.rentAmount.toLocaleString('en-IN')} + Fee: ₹{currentLateFee.toLocaleString('en-IN')})</span>
                         )}
+                        <div className="flex flex-col gap-1.5">
+                          {rec.status !== 'paid' && (
+                            <Button variant="outline" className="!px-3 !py-1.5 !text-xs !bg-green-50 !border-green-200 !text-green-700 font-semibold" onClick={() => handleMarkRentPaid(rec)}>
+                              Mark as Paid
+                            </Button>
+                          )}
+                          {isOverdue && (
+                            <button
+                              className="px-3 py-1.5 bg-red-600 text-white rounded-lg text-xs font-semibold hover:bg-red-700 transition-colors"
+                              onClick={async () => {
+                                await addDoc(collection(db, 'notifications'), {
+                                  userId: rec.tenantId,
+                                  type: 'alert',
+                                  message: `🚨 WARNING: Your rent of ₹${rec.rentAmount} for ${rec.month} is ${daysOver} day${daysOver > 1 ? 's' : ''} overdue with ₹${currentLateFee} in late fees. Pay immediately to avoid further charges.`,
+                                  status: 'unread',
+                                  createdAt: new Date().toISOString()
+                                });
+                                alert('Warning notification sent to tenant!');
+                              }}
+                            >
+                              ⚠️ Send Warning
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   );
