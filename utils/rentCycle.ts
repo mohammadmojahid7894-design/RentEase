@@ -60,6 +60,7 @@ export const createFirstRentRecord = async (
     reminderSent5: false,
     reminderSent2: false,
     reminderSentDue: false,
+    reminderSentOverdue: false,
     createdAt: new Date().toISOString()
   });
 
@@ -103,16 +104,34 @@ export const createNextCycleRecord = async (
     reminderSent5: false,
     reminderSent2: false,
     reminderSentDue: false,
+    reminderSentOverdue: false,
     createdAt: new Date().toISOString()
   });
 };
 
+// ── Helper: check if a notification was already sent today for same record ──
+const wasNotifSentToday = async (tenantId: string, messageSubstring: string): Promise<boolean> => {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const q = query(
+    collection(db, 'notifications'),
+    where('userId', '==', tenantId)
+  );
+  const snap = await getDocs(q);
+  return snap.docs.some(d => {
+    const data = d.data();
+    return data.message?.includes(messageSubstring) &&
+           new Date(data.createdAt) >= todayStart;
+  });
+};
+
 // ── Process overdue records & send reminders ────────────────────────────────
+// Called on tenant login / app load via onSnapshot in TenantPanel
 export const processRentCycles = async (tenantId: string) => {
   const q = query(
     collection(db, 'rentRecords'),
     where('tenantId', '==', tenantId),
-    where('status', 'in', ['pending', 'late'])
+    where('status', 'in', ['pending', 'late', 'overdue'])
   );
   const snap = await getDocs(q);
   const now = new Date();
@@ -120,23 +139,36 @@ export const processRentCycles = async (tenantId: string) => {
   for (const docSnap of snap.docs) {
     const rec = docSnap.data();
     const dueDate = new Date(rec.dueDate);
-    const daysUntilDue = Math.floor((dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+    const diffMs = dueDate.getTime() - now.getTime();
+    const daysUntilDue = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     const updates: Record<string, any> = {};
 
-    // ── Overdue check ──
+    // ── Overdue check: update status and late fee ──
     if (now > dueDate) {
       const daysOver = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
       const lateFee = daysOver * (rec.lateFeePerDay || LATE_FEE_PER_DAY);
       updates.status = 'overdue';
       updates.lateFee = lateFee;
+
+      // Send overdue notification (once, tracked by flag)
+      if (!rec.reminderSentOverdue) {
+        await addDoc(collection(db, 'notifications'), {
+          userId: tenantId,
+          type: 'overdue',
+          message: `🚨 Your rent of ₹${rec.rentAmount} for ${rec.month} is OVERDUE by ${daysOver} day${daysOver > 1 ? 's' : ''}! Late fee of ₹${lateFee} has been applied (₹${rec.lateFeePerDay || LATE_FEE_PER_DAY}/day). Total due: ₹${rec.rentAmount + lateFee}. Pay immediately.`,
+          status: 'unread',
+          createdAt: new Date().toISOString()
+        });
+        updates.reminderSentOverdue = true;
+      }
     }
 
     // ── Reminder: 5 days before ──
     if (daysUntilDue <= 5 && daysUntilDue > 2 && !rec.reminderSent5) {
       await addDoc(collection(db, 'notifications'), {
         userId: tenantId,
-        type: 'reminder',
-        message: `⏰ Rent of ₹${rec.rentAmount} for ${rec.month} is due in ${daysUntilDue} days (${dueDate.toLocaleDateString()}).`,
+        type: 'rent_reminder',
+        message: `⏰ Your rent of ₹${rec.rentAmount} for ${rec.month} is due in ${daysUntilDue} days (${dueDate.toLocaleDateString()}). Pay on time to avoid late fees.`,
         status: 'unread',
         createdAt: new Date().toISOString()
       });
@@ -147,8 +179,8 @@ export const processRentCycles = async (tenantId: string) => {
     if (daysUntilDue <= 2 && daysUntilDue > 0 && !rec.reminderSent2) {
       await addDoc(collection(db, 'notifications'), {
         userId: tenantId,
-        type: 'reminder',
-        message: `⚠️ Rent of ₹${rec.rentAmount} for ${rec.month} is due in ${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''}! Pay now to avoid late fees.`,
+        type: 'rent_reminder',
+        message: `⚠️ Rent of ₹${rec.rentAmount} for ${rec.month} is due in ${daysUntilDue} day${daysUntilDue > 1 ? 's' : ''}! Pay now to avoid late fees of ₹${rec.lateFeePerDay || LATE_FEE_PER_DAY}/day.`,
         status: 'unread',
         createdAt: new Date().toISOString()
       });
@@ -156,11 +188,11 @@ export const processRentCycles = async (tenantId: string) => {
     }
 
     // ── Reminder: on due date ──
-    if (daysUntilDue <= 0 && daysUntilDue > -1 && !rec.reminderSentDue) {
+    if (daysUntilDue === 0 && !rec.reminderSentDue) {
       await addDoc(collection(db, 'notifications'), {
         userId: tenantId,
-        type: 'reminder',
-        message: `🚨 Rent of ₹${rec.rentAmount} for ${rec.month} is DUE TODAY! Late fees of ₹${LATE_FEE_PER_DAY}/day will apply from tomorrow.`,
+        type: 'rent_reminder',
+        message: `🚨 Rent of ₹${rec.rentAmount} for ${rec.month} is DUE TODAY! Late fees of ₹${rec.lateFeePerDay || LATE_FEE_PER_DAY}/day will apply from tomorrow.`,
         status: 'unread',
         createdAt: new Date().toISOString()
       });

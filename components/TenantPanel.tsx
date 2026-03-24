@@ -1066,7 +1066,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         {activeTab === 'notifications' && (
           <div className="space-y-6">
             <div className="flex justify-between items-center">
-              <h3 className="text-2xl font-bold">Notifications {unreadCount > 0 && <span className="ml-2 text-sm font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full">{unreadCount} unread</span>}</h3>
+              <h3 className="text-2xl font-bold">Notifications {unreadCount > 0 && <span className="ml-2 text-sm font-bold bg-red-100 text-red-600 px-2 py-0.5 rounded-full animate-pulse">{unreadCount} unread</span>}</h3>
               {unreadCount > 0 && <button onClick={markAllRead} className="text-sm text-[#4B5EAA] font-semibold hover:underline">Mark all as read</button>}
             </div>
             {myNotifications.length === 0 ? (
@@ -1075,18 +1075,62 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               </div>
             ) : (
               <div className="space-y-3">
-                {myNotifications.map(notif => (
-                  <div key={notif.id} className={`p-4 rounded-2xl border flex items-start gap-4 transition-all ${notif.status === 'unread' ? 'bg-[#EEF2FF] border-[#C7D2FE]' : 'bg-white border-[#EAEAEA]'}`}>
-                    <div className={`p-2 rounded-xl shrink-0 text-lg ${notif.type === 'payment' ? 'bg-green-100' : notif.type === 'notice' ? 'bg-blue-100' : notif.type === 'reminder' ? 'bg-orange-100' : notif.type === 'complaint' ? 'bg-purple-100' : 'bg-yellow-100'}`}>
-                      {notif.type === 'payment' ? '₹' : notif.type === 'notice' ? '📋' : notif.type === 'reminder' ? '⏰' : notif.type === 'complaint' ? '🔧' : '🔔'}
+                {myNotifications.map(notif => {
+                  const iconBg =
+                    notif.type === 'payment' ? 'bg-green-100' :
+                    notif.type === 'rent_reminder' ? 'bg-orange-100' :
+                    notif.type === 'overdue' ? 'bg-red-100' :
+                    notif.type === 'notice' ? 'bg-blue-100' :
+                    notif.type === 'reminder' ? 'bg-orange-100' :
+                    notif.type === 'complaint' ? 'bg-purple-100' :
+                    notif.type === 'alert' ? 'bg-red-100' :
+                    'bg-yellow-100';
+                  const icon =
+                    notif.type === 'payment' ? '₹' :
+                    notif.type === 'rent_reminder' ? '⏰' :
+                    notif.type === 'overdue' ? '🚨' :
+                    notif.type === 'notice' ? '📋' :
+                    notif.type === 'reminder' ? '⏰' :
+                    notif.type === 'complaint' ? '🔧' :
+                    notif.type === 'alert' ? '⚠️' :
+                    '🔔';
+                  const isOverdueNotif = notif.type === 'overdue';
+
+                  return (
+                    <div key={notif.id} className={`p-4 rounded-2xl border flex items-start gap-4 transition-all ${
+                      isOverdueNotif && notif.status === 'unread' ? 'bg-red-50 border-red-200' :
+                      notif.status === 'unread' ? 'bg-[#EEF2FF] border-[#C7D2FE]' :
+                      'bg-white border-[#EAEAEA]'
+                    }`}>
+                      <div className={`p-2 rounded-xl shrink-0 text-lg ${iconBg}`}>
+                        {icon}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold uppercase ${
+                            isOverdueNotif ? 'bg-red-100 text-red-700' :
+                            notif.type === 'rent_reminder' ? 'bg-orange-100 text-orange-700' :
+                            notif.type === 'payment' ? 'bg-green-100 text-green-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>{notif.type.replace('_', ' ')}</span>
+                        </div>
+                        <p className={`text-sm ${notif.status === 'unread' ? 'font-bold text-gray-900' : 'text-gray-700'}`}>{notif.message}</p>
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <p className="text-xs text-gray-400">{new Date(notif.createdAt).toLocaleString()}</p>
+                          {notif.status === 'unread' && notif.id && (
+                            <button
+                              onClick={() => updateDoc(doc(db, 'notifications', notif.id!), { status: 'read' })}
+                              className="text-xs text-[#4B5EAA] font-semibold hover:underline"
+                            >
+                              Mark read
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      {notif.status === 'unread' && <span className={`w-2.5 h-2.5 rounded-full shrink-0 mt-1 flex-none ${isOverdueNotif ? 'bg-red-500 animate-pulse' : 'bg-[#4B5EAA]'}`}></span>}
                     </div>
-                    <div className="flex-1">
-                      <p className={`text-sm ${notif.status === 'unread' ? 'font-bold text-gray-900' : 'text-gray-700'}`}>{notif.message}</p>
-                      <p className="text-xs text-gray-400 mt-1">{new Date(notif.createdAt).toLocaleString()}</p>
-                    </div>
-                    {notif.status === 'unread' && <span className="w-2.5 h-2.5 rounded-full bg-[#4B5EAA] shrink-0 mt-1 flex-none"></span>}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>

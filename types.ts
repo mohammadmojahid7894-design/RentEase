@@ -211,7 +211,7 @@ export interface RentRecord {
 export interface AppNotification {
   id?: string;
   userId: string;
-  type: 'payment' | 'notice' | 'alert' | 'request' | 'reminder' | 'complaint';
+  type: 'payment' | 'notice' | 'alert' | 'request' | 'reminder' | 'complaint' | 'rent_reminder' | 'overdue';
   message: string;
   status: 'unread' | 'read';
   createdAt: string;
