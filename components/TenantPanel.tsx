@@ -127,6 +127,8 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
     const q = query(collection(db, 'requests'), where('tenantId', '==', user.id));
     const unsubscribe = onSnapshot(q, async (snapshot) => {
       const reqData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as InterestRequest));
+      console.log("[DEBUG] Fetched Tenant Requests for User:", user.id, reqData);
+      
       const now = Date.now();
       for (const r of reqData) {
         if (r.status === 'approved' && r.approvedAt) {
@@ -749,20 +751,31 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               <div className="space-y-4">
                 {myRequests.map(req => {
                   const prop = allProperties.find(p => p.id === req.propertyId);
+                  const safeStatus = req.status || 'pending';
+                  
+                  const getBadgeStyle = () => {
+                    if (safeStatus === 'approved') return 'bg-blue-100 text-blue-700 border-blue-200';
+                    if (safeStatus === 'paid') return 'bg-green-100 text-green-700 border-green-200';
+                    if (safeStatus === 'cancelled_due_to_no_payment') return 'bg-gray-100 text-gray-700 border-gray-200';
+                    if (safeStatus === 'rejected') return 'bg-red-100 text-red-700 border-red-200';
+                    return 'bg-yellow-100 text-yellow-700 border-yellow-200'; // pending
+                  };
+                  
+                  const getBadgeText = () => {
+                    if (safeStatus === 'approved') return 'Approved - Awaiting Payment';
+                    if (safeStatus === 'paid') return 'Paid';
+                    if (safeStatus === 'cancelled_due_to_no_payment') return 'Cancelled (No Payment)';
+                    if (safeStatus === 'rejected') return 'Request Rejected';
+                    return 'Pending Approval';
+                  };
+
                   return (
                     <div key={req.id} className="bg-white p-6 rounded-2xl border border-[#EAEAEA] shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
                       <div>
                         <div className="flex items-center gap-3 mb-2">
-                          <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase shadow-sm ${req.status === 'pending' ? 'bg-yellow-100 text-yellow-700 border border-yellow-200' :
-                            req.status === 'approved' ? 'bg-blue-100 text-blue-700 border border-blue-200' :
-                            req.status === 'paid' ? 'bg-green-100 text-green-700 border border-green-200' :
-                            req.status === 'cancelled_due_to_no_payment' ? 'bg-gray-100 text-gray-700 border border-gray-200' :
-                              'bg-red-100 text-red-700 border border-red-200'
-                            }`}>{
-                              req.status === 'approved' ? 'Approved - Awaiting Payment' :
-                              req.status === 'cancelled_due_to_no_payment' ? 'Cancelled (No Payment)' :
-                              req.status
-                            }</span>
+                          <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase shadow-sm border ${getBadgeStyle()}`}>
+                            {getBadgeText()}
+                          </span>
                           <span className="text-sm text-gray-400 font-medium">Applied on {new Date(req.createdAt).toLocaleDateString()}</span>
                         </div>
                         <h4 className="text-xl font-bold text-[#2D3436] mt-3">
@@ -774,7 +787,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                             {req.selectedUnits.length} Unit{req.selectedUnits.length > 1 ? 's' : ''} Requested
                           </p>
                         )}
-                        {req.status === 'approved' && (
+                        {safeStatus === 'approved' && (
                           <Button 
                             variant="primary" 
                             className="mt-3 shadow-md border border-[#3D4D8C] hover:-translate-y-0.5" 
