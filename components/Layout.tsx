@@ -44,7 +44,8 @@ const Layout: React.FC<LayoutProps> = ({
              </svg>
              {t.backToHome}
           </button>
-          <h2 className="text-2xl font-bold text-[#4B5EAA]">Ghar-ka-System</h2>
+          <h2 className="text-2xl font-bold text-[#4B5EAA]">RentEase</h2>
+          <p className="text-[10px] text-[#8E9491] mt-0.5 tracking-wide">Smart Rental Management System</p>
           <p className="text-xs text-[#8E9491] mt-1">{userRole} Panel</p>
         </div>
         
