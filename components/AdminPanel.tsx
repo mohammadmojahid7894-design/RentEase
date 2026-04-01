@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, deleteDoc, writeBatch, updateDoc, addDoc } from 'firebase/firestore';
-import { User, Property, InterestRequest } from '../types';
+import { collection, getDocs, doc, deleteDoc, writeBatch, updateDoc, addDoc, onSnapshot } from 'firebase/firestore';
+import { User, Property, InterestRequest, AdminEarning } from '../types';
 import { Icons } from '../constants';
 import { Language } from '../translations';
 
@@ -12,7 +12,7 @@ interface AdminPanelProps {
 }
 
 const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'owners' | 'tenants' | 'properties' | 'requests' | 'settings'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'owners' | 'tenants' | 'properties' | 'requests' | 'settings' | 'earnings'>('dashboard');
   const [loading, setLoading] = useState(true);
 
   // States for data
@@ -23,6 +23,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
   // Property Filters
   const [propertyFilter, setPropertyFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [propertySearchToken, setPropertySearchToken] = useState('');
+  const [adminEarnings, setAdminEarnings] = useState<AdminEarning[]>([]);
 
   const fetchData = async () => {
     setLoading(true);
@@ -43,6 +44,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
 
   useEffect(() => {
     fetchData();
+    const unsub = onSnapshot(collection(db, 'adminEarnings'), (snap) => {
+      setAdminEarnings(snap.docs.map(doc => ({ id: doc.id, ...doc.data() } as AdminEarning)));
+    });
+    return () => unsub();
   }, []);
 
   const owners = users.filter((u) => u.role === 'owner' || u.role === 'OWNER');
@@ -389,8 +394,92 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
     </div>
   );
 
+  const renderEarnings = () => {
+    const total = adminEarnings.reduce((sum, item) => sum + item.amount, 0);
+    const listingTotal = adminEarnings.filter(e => e.type === 'listing').reduce((sum, item) => sum + item.amount, 0);
+    const subTotal = adminEarnings.filter(e => e.type === 'subscription').reduce((sum, item) => sum + item.amount, 0);
+    const brokerageTotal = adminEarnings.filter(e => e.type === 'brokerage').reduce((sum, item) => sum + item.amount, 0);
+
+    const sortedEarnings = [...adminEarnings].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    return (
+      <div className="animate-fadeIn">
+        <h2 className="text-3xl font-extrabold text-gray-800 mb-6 drop-shadow-sm">Admin Earnings Dashboard</h2>
+        
+        <div className="bg-gradient-to-r from-emerald-500 to-teal-600 rounded-3xl p-8 shadow-2xl mb-8 text-white relative overflow-hidden group">
+          <div className="absolute -right-10 -top-10 w-48 h-48 bg-white opacity-10 rounded-full group-hover:scale-110 transition-transform duration-700"></div>
+          <p className="text-emerald-100 font-bold uppercase tracking-widest text-sm mb-2">Total Platform Earnings</p>
+          <h3 className="text-5xl font-black drop-shadow-md">₹{total.toLocaleString('en-IN')}</h3>
+          <p className="text-emerald-50 mt-4 font-medium opacity-90">{adminEarnings.length} Total Transactions</p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+          <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 hover:-translate-y-1 transition-transform border-t-4 border-t-blue-500">
+            <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Listing Income</p>
+            <h4 className="text-3xl font-black text-blue-600 mt-2">₹{listingTotal.toLocaleString('en-IN')}</h4>
+            <div className="mt-2 text-xs text-gray-400 bg-blue-50 px-2 py-1 rounded w-fit">₹49 per listing</div>
+          </div>
+          <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 hover:-translate-y-1 transition-transform border-t-4 border-t-purple-500">
+            <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Subscription Income</p>
+            <h4 className="text-3xl font-black text-purple-600 mt-2">₹{subTotal.toLocaleString('en-IN')}</h4>
+            <div className="mt-2 text-xs text-gray-400 bg-purple-50 px-2 py-1 rounded w-fit">₹199 / month</div>
+          </div>
+          <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 hover:-translate-y-1 transition-transform border-t-4 border-t-amber-500">
+            <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Brokerage Income</p>
+            <h4 className="text-3xl font-black text-amber-600 mt-2">₹{brokerageTotal.toLocaleString('en-IN')}</h4>
+            <div className="mt-2 text-xs text-gray-400 bg-amber-50 px-2 py-1 rounded w-fit">50% of booking rent</div>
+          </div>
+        </div>
+
+        <h3 className="text-2xl font-bold text-gray-800 mb-4">Recent Transactions</h3>
+        <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 overflow-x-auto">
+          <table className="w-full text-left border-collapse">
+            <thead>
+               <tr className="border-b-2 border-gray-100 text-gray-500 uppercase tracking-wider text-sm">
+                 <th className="py-4 px-4 font-bold">Date & Time</th>
+                 <th className="py-4 px-4 font-bold">Type</th>
+                 <th className="py-4 px-4 font-bold">User</th>
+                 <th className="py-4 px-4 font-bold text-right">Amount</th>
+               </tr>
+            </thead>
+            <tbody>
+              {sortedEarnings.map(e => {
+                 const typeStyle = 
+                    e.type === 'listing' ? 'bg-blue-100 text-blue-700' :
+                    e.type === 'subscription' ? 'bg-purple-100 text-purple-700' :
+                    'bg-amber-100 text-amber-700';
+                 return (
+                   <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">
+                     <td className="py-4 px-4 text-gray-600 font-medium">
+                       {new Date(e.date).toLocaleString()}
+                     </td>
+                     <td className="py-4 px-4">
+                       <span className={`px-3 py-1 text-xs font-bold uppercase rounded-full ${typeStyle}`}>
+                         {e.type}
+                       </span>
+                     </td>
+                     <td className="py-4 px-4 text-gray-500 text-sm font-mono truncate max-w-[150px]" title={e.userId}>
+                       {e.userId.substring(0, 8)}...
+                     </td>
+                     <td className="py-4 px-4 text-emerald-600 font-black text-lg text-right">
+                       +₹{e.amount.toLocaleString('en-IN')}
+                     </td>
+                   </tr>
+                 );
+              })}
+              {sortedEarnings.length === 0 && (
+                <tr><td colSpan={4} className="py-8 text-center text-gray-500">No earnings recorded yet.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: <Icons.Home /> },
+    { id: 'earnings', label: 'Earnings', icon: <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-5 h-5"><path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg> },
     { id: 'owners', label: 'Owners', icon: <Icons.Users /> },
     { id: 'tenants', label: 'Tenants', icon: <Icons.Users /> },
     { id: 'properties', label: 'Properties', icon: <Icons.Rent /> },
@@ -472,6 +561,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
                 {activeTab === 'tenants' && renderUsersTable('Manage Tenants', tenants, false)}
                 {activeTab === 'properties' && renderPropertiesTable()}
                 {activeTab === 'requests' && renderRequestsTable()}
+                {activeTab === 'earnings' && renderEarnings()}
                 {activeTab === 'settings' && renderSettings()}
               </>
             )}
