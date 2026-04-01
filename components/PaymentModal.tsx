@@ -8,11 +8,13 @@ interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
   amount: number;
-  month: string;
+  month?: string;
+  title?: string;
+  subtitle?: string;
   onPaymentSuccess: (method: string, transactionId: string) => Promise<void>;
 }
 
-const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, amount, month, onPaymentSuccess }) => {
+const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, amount, month, title, subtitle, onPaymentSuccess }) => {
   const [paymentMethod, setPaymentMethod] = useState('UPI');
   const [isProcessing, setIsProcessing] = useState(false);
   const [bank, setBank] = useState('');
@@ -46,7 +48,7 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, amount, mo
   };
 
   const UPI_ID = 'rentease@upi';
-  const upiUri = `upi://pay?pa=${UPI_ID}&pn=RentEase&am=${amount}&cu=INR&tn=Rent-${month.replace(/\s/g, '-')}`;
+  const upiUri = `upi://pay?pa=${UPI_ID}&pn=RentEase&am=${amount}&cu=INR&tn=${title ? title.replace(/\s/g, '-') : 'Payment'}`;
 
   const handleCopyUpi = () => {
     navigator.clipboard.writeText(UPI_ID).then(() => {
@@ -68,8 +70,8 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, amount, mo
         {/* Header - Amount Info */}
         <div className="bg-gradient-to-r from-gray-900 to-gray-800 p-6 rounded-2xl text-white shadow-lg flex justify-between items-center">
           <div>
-            <p className="text-gray-400 text-sm font-medium mb-1">Paying Rent For</p>
-            <p className="text-lg font-bold">{month}</p>
+            <p className="text-gray-400 text-sm font-medium mb-1">{subtitle || 'Paying For'}</p>
+            <p className="text-lg font-bold">{title || month}</p>
           </div>
           <div className="text-right">
             <p className="text-gray-400 text-sm font-medium mb-1">Amount Due</p>

@@ -1,0 +1,24 @@
+graph TD
+    %% Entities
+    Owner([Owner])
+    Tenant([Tenant])
+    Admin([Admin])
+    
+    %% System
+    System(((RentEase System\nLevel 0 DFD)))
+    
+    %% Relationships
+    Owner -- "Add Property\nManage Units\nView Reports\nCollect Rent" --> System
+    System -- "Payment Alerts\nRequest Updates\nTenant Info" --> Owner
+    
+    Tenant -- "Search Property\nSend Request\nPay Rent\nSubmit Complaints" --> System
+    System -- "Rent Reminders\nApproval Status\nPayment Receipts" --> Tenant
+    
+    Admin -- "Manage Users\nResolve Disputes\nMonitor Activity\nSystem Configuration" --> System
+    System -- "System Logs\nDispute Details\nUsage Analytics" --> Admin
+
+    %% Styling
+    classDef sys fill:#d4af37,stroke:#fff,stroke-width:2px,color:#fff,shape:circle
+    classDef ext fill:#1a1a1a,stroke:#d4af37,stroke-width:2px,color:#fff
+    class System sys
+    class Owner,Tenant,Admin ext

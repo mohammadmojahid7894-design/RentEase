@@ -1,0 +1,54 @@
+graph TD
+    %% External Entities
+    Owner([Owner])
+    Tenant([Tenant])
+    
+    %% Processes
+    P1((1.0\nUser Auth &\nProfile Mgmt))
+    P2((2.0\nProperty &\nUnit Mgmt))
+    P3((3.0\nTenant\nRequests))
+    P4((4.0\nRent &\nPayments))
+    
+    %% Data Stores
+    D1[(D1 Users DB)]
+    D2[(D2 Properties DB)]
+    D3[(D3 Requests DB)]
+    D4[(D4 Rent Records DB)]
+    
+    %% Data Flow from/to Users
+    Owner -- "Login Info" --> P1
+    Tenant -- "Login Info" --> P1
+    P1 -- "Auth Token" --> Owner
+    P1 -- "Auth Token" --> Tenant
+    
+    Owner -- "Add/Edit Property\nDetails" --> P2
+    P2 -- "Unit Listing" --> Tenant
+    
+    Tenant -- "Send Join Request" --> P3
+    P3 -- "Notify Owner" --> Owner
+    Owner -- "Approve/Reject" --> P3
+    P3 -- "Status Update" --> Tenant
+    
+    Tenant -- "Pay Rent" --> P4
+    P4 -- "Rent Receipt" --> Tenant
+    P4 -- "Payment Update" --> Owner
+    
+    %% Data Flow to Data Stores
+    P1 <--> D1
+    P2 <--> D2
+    P3 <--> D3
+    P4 <--> D4
+    
+    %% Internal flows
+    D1 -. "Verify Owner" .-> P2
+    D2 -. "Fetch Unit" .-> P3
+    D3 -. "Assigned Unit Info" .-> P4
+
+    %% Styling 
+    classDef process fill:#d4af37,stroke:#fff,stroke-width:2px,color:#fff,shape:circle
+    classDef sys fill:#1a1a1a,stroke:#d4af37,stroke-width:2px,color:#fff
+    classDef datastore fill:#eee,stroke:#999,stroke-width:2px,shape:cylinder
+    
+    class P1,P2,P3,P4 process
+    class Owner,Tenant sys
+    class D1,D2,D3,D4 datastore

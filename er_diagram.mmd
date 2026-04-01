@@ -1,0 +1,67 @@
+erDiagram
+    USERS {
+        string uid PK
+        string role "owner, tenant, admin"
+        string displayName
+        string email
+        string phone
+        date createdAt
+    }
+    
+    PROPERTIES {
+        string id PK
+        string ownerId FK
+        string name
+        string address
+        string type
+        int totalUnits
+    }
+
+    UNITS {
+        string id PK
+        string propertyId FK
+        string unitName "e.g., Flat 101"
+        float rentAmount
+        string status "vacant, occupied"
+        string tenantId FK "nullable"
+    }
+
+    TENANT_REQUESTS {
+        string id PK
+        string propertyId FK
+        string tenantId FK
+        string ownerId FK
+        string status "pending, accepted, rejected"
+        date requestDate
+    }
+
+    RENT_RECORDS {
+        string id PK
+        string unitId FK
+        string tenantId FK
+        string ownerId FK
+        string monthYear
+        float amount
+        string status "paid, unpaid, pending"
+        date paymentDate
+    }
+
+    NOTIFICATIONS {
+        string id PK
+        string userId FK
+        string message
+        boolean isRead
+        date timestamp
+    }
+
+    USERS ||--o{ PROPERTIES : "owns"
+    PROPERTIES ||--|{ UNITS : "contains"
+    USERS ||--|{ UNITS : "occupies"
+    
+    USERS ||--|{ TENANT_REQUESTS : "sends/receives"
+    PROPERTIES ||--|{ TENANT_REQUESTS : "handled for"
+    
+    USERS ||--|{ RENT_RECORDS : "pays/collects"
+    UNITS ||--|{ RENT_RECORDS : "generates"
+
+    USERS ||--o{ NOTIFICATIONS : "receives"

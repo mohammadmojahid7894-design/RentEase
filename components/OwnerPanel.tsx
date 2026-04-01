@@ -9,6 +9,7 @@ import { Icons } from '../constants';
 import Button from './Button';
 import Layout from './Layout';
 import Modal from './Modal';
+import PaymentModal from './PaymentModal';
 import { TRANSLATIONS, Language } from '../translations';
 
 interface OwnerPanelProps {
@@ -114,6 +115,9 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   // ── Occupied tenants map (for notice form dropdown) ───────────────────────
   const [occupiedTenants, setOccupiedTenants] = useState<{ tenantId: string; name: string; phone: string; propertyId: string; propertyTitle: string }[]>([]);
 
+  // Monetization State
+  const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
+  const [isListingFeeModalOpen, setIsListingFeeModalOpen] = useState(false);
 
   const t = TRANSLATIONS[lang];
 
@@ -439,8 +443,13 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedPropertyForUnits]);
 
-  const handleAddPropertySubmit = async (e: React.FormEvent) => {
+  const handleListingFeePaymentClick = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!newProperty.propertyTitle || !newProperty.location) return;
+    setIsListingFeeModalOpen(true);
+  };
+
+  const handleAddPropertySubmit = async (method: string, transactionId: string) => {
     setAddingProperty(true);
     try {
       let imageUrls: string[] = [];
@@ -462,10 +471,25 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         isVisibleToTenants: false,
         createdAt: new Date().toISOString(),
         images: imageUrls,
-        units: newProperty.units.map(u => ({ ...u, rentAmount: Number(u.rentAmount) }))
+        units: newProperty.units.map(u => ({ ...u, rentAmount: Number(u.rentAmount) })),
+        listingPaid: true,
+        listingFee: 49,
+        paymentStatus: 'success'
       };
-      await addDoc(collection(db, 'properties'), propData);
+      
+      const newPropRef = await addDoc(collection(db, 'properties'), propData);
 
+      // Track Admin Earning
+      await addDoc(collection(db, 'adminEarnings'), {
+        type: 'listing',
+        amount: 49,
+        userId: user.id,
+        propertyId: newPropRef.id,
+        date: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      });
+
+      setIsListingFeeModalOpen(false);
       setIsPropertyModalOpen(false);
       setNewPropertyImages([]);
       setNewProperty({
@@ -478,7 +502,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         availabilityStatus: 'available',
         units: [{ unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] as PropertyUnit[]
       });
-      alert('Your property has been submitted for approval. It will be visible to tenants once approved by the admin.');
+      alert('Payment successful! Your property has been submitted for approval.');
     } catch (err) {
       console.error(err);
       alert('Failed to add property');
@@ -486,6 +510,53 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
       setAddingProperty(false);
     }
   };
+
+  const handleSubscriptionSuccess = async (method: string, transactionId: string) => {
+    try {
+      const uQ = query(collection(db, 'users'), where('userId', '==', user.id));
+      const uSnap = await getDocs(uQ);
+      if (!uSnap.empty) {
+        const userDocId = uSnap.docs[0].id;
+        const subscriptionDate = new Date().toISOString();
+        const expiryDate = new Date();
+        expiryDate.setMonth(expiryDate.getMonth() + 1);
+        
+        await updateDoc(doc(db, 'users', userDocId), {
+          isPremium: true,
+          planType: 'premium',
+          subscriptionDate,
+          expiryDate: expiryDate.toISOString()
+        });
+        
+        // Save Admin Earning
+        await addDoc(collection(db, 'adminEarnings'), {
+          type: 'subscription',
+          amount: 199,
+          userId: user.id,
+          date: new Date().toISOString(),
+          createdAt: new Date().toISOString()
+        });
+
+        // Update local session
+        await login({...user, isPremium: true, planType: 'premium'});
+        
+        setIsSubscriptionModalOpen(false);
+        alert('Welcome to Premium! You can now list unlimited properties.');
+      }
+    } catch(err) {
+      console.error(err);
+      alert('Failed to activate premium.');
+    }
+  };
+
+  const handleAddNewPropertyClick = () => {
+    if (user.planType !== 'premium' && properties.length >= 1) {
+      setIsSubscriptionModalOpen(true);
+      return;
+    }
+    setIsPropertyModalOpen(true);
+  };
+
 
   const handleApproveClick = async (req: InterestRequest) => {
     const confirm = window.confirm('Are you sure you want to approve this request?');
@@ -863,9 +934,17 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <h2 className="text-xl font-bold text-[#4B5EAA]">Owner Dashboard</h2>
               <p className="text-sm text-[#8E9491]">Welcome, {user.name}!</p>
               {user.systemId && (
-                <span className="inline-block mt-1 text-xs font-mono font-bold bg-[#EEF2FF] text-[#4B5EAA] border border-[#C7D2FE] px-2 py-0.5 rounded-full">
+                <span className="inline-block mt-1 text-xs font-mono font-bold bg-[#EEF2FF] text-[#4B5EAA] border border-[#C7D2FE] px-2 py-0.5 rounded-full mr-2">
                   ID: {user.systemId}
                 </span>
+              )}
+              <span className={`inline-block mt-1 px-3 py-1 text-xs font-bold rounded-full ${user.planType === 'premium' ? 'bg-gradient-to-r from-amber-200 to-yellow-400 text-yellow-900 border border-yellow-500 shadow-sm' : 'bg-gray-200 text-gray-700'}`}>
+                {user.planType === 'premium' ? '👑 Premium Plan' : 'Free Plan'}
+              </span>
+              {user.planType !== 'premium' && (
+                <Button onClick={() => setIsSubscriptionModalOpen(true)} className="ml-3 !px-3 !py-1 !text-xs !bg-gradient-to-r !from-purple-600 !to-indigo-600 border-none shadow-md hover:shadow-lg transition-all !text-white font-bold">
+                  Upgrade to Premium
+                </Button>
               )}
             </div>
           </div>
@@ -984,7 +1063,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
 
             <div className="flex justify-between items-center">
               <h3 className="text-2xl font-bold">{t.myProperties}</h3>
-              <Button onClick={() => setIsPropertyModalOpen(true)} variant="primary" className="!px-4 !py-2 !text-sm !rounded-lg hover:shadow-lg hover:-translate-y-0.5 transition-all">
+              <Button onClick={handleAddNewPropertyClick} variant="primary" className="!px-4 !py-2 !text-sm !rounded-lg hover:shadow-lg hover:-translate-y-0.5 transition-all">
                 <Icons.Add /> <span className="ml-1">{t.addNew}</span>
               </Button>
             </div>
@@ -1496,7 +1575,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
 
         {/* Modals */}
         <Modal isOpen={isPropertyModalOpen} onClose={() => setIsPropertyModalOpen(false)} title="Add New Property">
-          <form onSubmit={handleAddPropertySubmit} className="space-y-4">
+          <form onSubmit={handleListingFeePaymentClick} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Property Title</label>
               <input required value={newProperty.propertyTitle} onChange={e => setNewProperty({ ...newProperty, propertyTitle: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="e.g. Modern 2BHK flat" />
@@ -1782,6 +1861,30 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
             </div>
           </form>
         </Modal>
+
+        {isListingFeeModalOpen && (
+          <PaymentModal
+            isOpen={isListingFeeModalOpen}
+            onClose={() => setIsListingFeeModalOpen(false)}
+            amount={49}
+            month={newProperty.propertyTitle || 'New Property'}
+            title={newProperty.propertyTitle || 'Listing Fee'}
+            subtitle="Property Listing Fee"
+            onPaymentSuccess={handleAddPropertySubmit}
+          />
+        )}
+
+        {isSubscriptionModalOpen && (
+          <PaymentModal
+            isOpen={isSubscriptionModalOpen}
+            onClose={() => setIsSubscriptionModalOpen(false)}
+            amount={199}
+            month="Premium Plan"
+            title="Premium Plan"
+            subtitle="Subscription Upgrade"
+            onPaymentSuccess={handleSubscriptionSuccess}
+          />
+        )}
 
       </div>
     </Layout>

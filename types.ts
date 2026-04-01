@@ -56,6 +56,10 @@ export interface User {
     idProofUrl?: string;
     profilePhotoUrl?: string;
   };
+  isPremium?: boolean;
+  planType?: 'free' | 'premium';
+  subscriptionDate?: string;
+  expiryDate?: string;
 }
 
 export interface Property {
@@ -87,6 +91,9 @@ export interface Property {
   tenantId?: string;
   images?: string[];
   units?: PropertyUnit[];
+  listingPaid?: boolean;
+  listingFee?: number;
+  paymentStatus?: string;
 }
 
 export interface PropertyUnit {
@@ -217,4 +224,14 @@ export interface AppNotification {
   createdAt: string;
 }
 
+// ── Admin Earnings ────────────────────────────────────────────────────────────
+export interface AdminEarning {
+  id?: string;
+  type: 'listing' | 'subscription';
+  amount: number;
+  userId: string;
+  propertyId?: string;
+  date: string;
+  createdAt: string;
+}
 

@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Generate Diagrams</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 50px; background: #f0f0f0; }
+        .diagram-container { background: white; padding: 20px; border-radius: 8px; margin: 20px auto; display: inline-block; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        h2 { color: #d4af37; }
+        button { background: #1a1a1a; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 4px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: #333; }
+        #log { color: green; font-weight: bold; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>RentEase Diagrams Generator</h1>
+    <p>Wait a moment for the diagrams to render, then click the buttons to download them as High-Quality PNG images.</p>
+
+    <!-- ER Diagram -->
+    <div class="diagram-container">
+        <h2>ER Diagram</h2>
+        <div class="mermaid" id="er_diagram">
+erDiagram
+    USERS {
+        string uid PK
+        string role "owner, tenant, admin"
+        string displayName
+        string email
+        string phone
+        date createdAt
+    }
+    PROPERTIES {
+        string id PK
+        string ownerId FK
+        string name
+        string address
+        string type
+        int totalUnits
+    }
+    UNITS {
+        string id PK
+        string propertyId FK
+        string unitName "e.g., Flat 101"
+        float rentAmount
+        string status "vacant, occupied"
+        string tenantId FK "nullable"
+    }
+    TENANT_REQUESTS {
+        string id PK
+        string propertyId FK
+        string tenantId FK
+        string ownerId FK
+        string status "pending, accepted, rejected"
+        date requestDate
+    }
+    RENT_RECORDS {
+        string id PK
+        string unitId FK
+        string tenantId FK
+        string ownerId FK
+        string monthYear
+        float amount
+        string status "paid, unpaid, pending"
+        date paymentDate
+    }
+    USERS ||--o{ PROPERTIES : "owns"
+    PROPERTIES ||--|{ UNITS : "contains"
+    USERS ||--|{ UNITS : "occupies"
+    USERS ||--|{ TENANT_REQUESTS : "sends/receives"
+    PROPERTIES ||--|{ TENANT_REQUESTS : "handled for"
+    USERS ||--|{ RENT_RECORDS : "pays/collects"
+    UNITS ||--|{ RENT_RECORDS : "generates"
+        </div>
+        <br>
+        <button onclick="downloadPNG('er_diagram', 'RentEase_ER_Diagram.png')">Download ER Diagram</button>
+    </div>
+
+    <!-- Level 0 DFD -->
+    <div class="diagram-container">
+        <h2>Level 0 DFD (Context Diagram)</h2>
+        <div class="mermaid" id="dfd_0">
+graph TD
+    Owner([Owner])
+    Tenant([Tenant])
+    Admin([Admin])
+    System(((RentEase System\nLevel 0 DFD)))
+    
+    Owner -- "Add Property\nManage Units\nView Reports" --> System
+    System -- "Payment Alerts\nRequest Updates" --> Owner
+    
+    Tenant -- "Search Property\nSend Request\nPay Rent" --> System
+    System -- "Rent Reminders\nApproval Status" --> Tenant
+    
+    Admin -- "Manage Users\nResolve Disputes" --> System
+    System -- "System Logs" --> Admin
+
+    classDef sys fill:#d4af37,stroke:#fff,stroke-width:2px,color:#fff
+    classDef ext fill:#1a1a1a,stroke:#d4af37,stroke-width:2px,color:#fff
+    class System sys
+    class Owner,Tenant,Admin ext
+        </div>
+        <br>
+        <button onclick="downloadPNG('dfd_0', 'RentEase_DFD_Level_0.png')">Download Level 0 DFD</button>
+    </div>
+
+    <!-- Level 1 DFD -->
+    <div class="diagram-container">
+        <h2>Level 1 DFD</h2>
+        <div class="mermaid" id="dfd_1">
+graph TD
+    Owner([Owner])
+    Tenant([Tenant])
+    
+    P1((1.0\nUser Auth))
+    P2((2.0\nProperty Mgmt))
+    P3((3.0\nTenant Requests))
+    P4((4.0\nRent & Payments))
+    
+    D1[(D1 Users DB)]
+    D2[(D2 Properties DB)]
+    D3[(D3 Requests DB)]
+    D4[(D4 Rent Records DB)]
+    
+    Owner -- "Login" --> P1
+    Tenant -- "Login" --> P1
+    
+    Owner -- "Manage Property" --> P2
+    P2 -- "Unit Specs" --> Tenant
+    
+    Tenant -- "Join Request" --> P3
+    Owner -- "Approve" --> P3
+    
+    Tenant -- "Pay Rent" --> P4
+    P4 -- "Receipt" --> Owner
+    
+    P1 <--> D1
+    P2 <--> D2
+    P3 <--> D3
+    P4 <--> D4
+
+    classDef process fill:#d4af37,stroke:#fff,stroke-width:2px,color:#fff
+    classDef datastore fill:#eee,stroke:#999,stroke-width:2px
+    class P1,P2,P3,P4 process
+    class D1,D2,D3,D4 datastore
+        </div>
+        <br>
+        <button onclick="downloadPNG('dfd_1', 'RentEase_DFD_Level_1.png')">Download Level 1 DFD</button>
+    </div>
+
+    <p id="log"></p>
+
+    <script>
+        mermaid.initialize({ startOnLoad: true, theme: 'default', securityLevel: 'loose' });
+
+        function downloadPNG(containerId, filename) {
+            const svgElement = document.querySelector(`#${containerId} svg`);
+            if (!svgElement) {
+                alert("Please wait for diagram to render...");
+                return;
+            }
+            
+            // Convert SVG to string
+            const svgData = new XMLSerializer().serializeToString(svgElement);
+            
+            // Create a canvas element
+            const canvas = document.createElement("canvas");
+            const ctx = canvas.getContext("2d");
+            
+            // Parse dimensions
+            const width = parseInt(svgElement.getAttribute("width") || svgElement.getBoundingClientRect().width) * 2;
+            const height = parseInt(svgElement.getAttribute("height") || svgElement.getBoundingClientRect().height) * 2;
+            canvas.width = width;
+            canvas.height = height;
+            
+            // Fill white background
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, width, height);
+            
+            // Create an image object
+            const img = new Image();
+            img.src = "data:image/svg+xml;base64," + btoa(unescape(encodeURIComponent(svgData)));
+            
+            img.onload = function() {
+                // Draw image to canvas with double resolution for high quality
+                ctx.drawImage(img, 0, 0, width, height);
+                // Trigger download
+                const link = document.createElement("a");
+                link.download = filename;
+                link.href = canvas.toDataURL("image/png", 1.0);
+                link.click();
+                document.getElementById('log').innerText = "Downloaded " + filename + " successfully!";
+            };
+        }
+    </script>
+</body>
+</html>
