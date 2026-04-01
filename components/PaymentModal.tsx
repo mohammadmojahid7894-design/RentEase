@@ -11,10 +11,11 @@ interface PaymentModalProps {
   month?: string;
   title?: string;
   subtitle?: string;
+  breakdown?: { label: string; amount: number; isHighlighted?: boolean; tooltip?: string }[];
   onPaymentSuccess: (method: string, transactionId: string) => Promise<void>;
 }
 
-const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, amount, month, title, subtitle, onPaymentSuccess }) => {
+const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, amount, month, title, subtitle, breakdown, onPaymentSuccess }) => {
   const [paymentMethod, setPaymentMethod] = useState('UPI');
   const [isProcessing, setIsProcessing] = useState(false);
   const [bank, setBank] = useState('');
@@ -78,6 +79,34 @@ const PaymentModal: React.FC<PaymentModalProps> = ({ isOpen, onClose, amount, mo
             <p className="text-3xl font-extrabold text-white">₹{amount.toLocaleString('en-IN')}</p>
           </div>
         </div>
+
+        {breakdown && breakdown.length > 0 && (
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4">
+            <h4 className="text-sm font-bold text-gray-700 mb-3 border-b border-gray-200 pb-2">Payment Breakdown</h4>
+            <div className="space-y-2">
+              {breakdown.map((item, idx) => (
+                <div key={idx} className={`flex justify-between items-center text-sm ${item.isHighlighted ? 'font-bold text-[#4B5EAA] bg-[#EEF2FF] p-2 rounded -mx-2' : 'text-gray-600'}`}>
+                  <div className="flex items-center gap-1 group relative">
+                    {item.label}
+                    {item.tooltip && (
+                      <div className="cursor-help text-gray-400 hover:text-gray-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor" className="w-4 h-4"><path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" /></svg>
+                        <div className="absolute hidden group-hover:block bottom-full left-1/2 -translate-x-1/2 mb-1 w-48 p-2 bg-gray-900 text-white text-xs rounded shadow-lg z-10 break-words text-center">
+                          {item.tooltip}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <span>₹{item.amount.toLocaleString('en-IN')}</span>
+                </div>
+              ))}
+              <div className="flex justify-between items-center font-bold text-lg text-gray-800 pt-3 mt-3 border-t border-gray-200">
+                <span>Total Payable</span>
+                <span>₹{amount.toLocaleString('en-IN')}</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-col md:flex-row gap-6">
           {/* Payment Methods Sidebar */}

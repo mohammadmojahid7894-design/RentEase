@@ -121,6 +121,9 @@ export interface InterestRequest {
   idProofUrl?: string;
   addressProofUrl?: string;
   profilePhotoUrl?: string;
+  brokeragePaid?: boolean;
+  brokerageAmount?: number;
+  totalPaidAmount?: number;
 }
 
 export interface ManualTenant {
@@ -190,6 +193,7 @@ export interface RentPaymentRecord {
   paymentMethod: string;
   status: 'completed';
   transactionId?: string;
+  brokerageAmount?: number;
   createdAt: string;
 }
 
@@ -227,7 +231,7 @@ export interface AppNotification {
 // ── Admin Earnings ────────────────────────────────────────────────────────────
 export interface AdminEarning {
   id?: string;
-  type: 'listing' | 'subscription';
+  type: 'listing' | 'subscription' | 'brokerage';
   amount: number;
   userId: string;
   propertyId?: string;

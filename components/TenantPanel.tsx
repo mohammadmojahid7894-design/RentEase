@@ -420,7 +420,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
 
 
   // ── Pay Request Handler
-  const handlePayRequest = async (method: string, transactionId: string, amount: number) => {
+  const handlePayRequest = async (method: string, transactionId: string, rentAmt: number, depositAmt: number, brokerageAmt: number, totalAmt: number) => {
     if (!selectedRequestToPay?.id || !user.id) return;
     try {
       const propRef = doc(db, 'properties', selectedRequestToPay.propertyId);
@@ -435,7 +435,10 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
 
       await updateDoc(doc(db, 'requests', selectedRequestToPay.id), {
         status: 'paid',
-        paymentDate: new Date().toISOString()
+        paymentDate: new Date().toISOString(),
+        brokeragePaid: true,
+        brokerageAmount: brokerageAmt,
+        totalPaidAmount: totalAmt
       });
 
       await addDoc(collection(db, 'rent_payments'), {
@@ -443,27 +446,40 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         ownerId: prop?.ownerId || '',
         propertyId: selectedRequestToPay.propertyId,
         requestId: selectedRequestToPay.id,
-        amount,
-        month: 'Initial Security & Rent',
+        amount: totalAmt,
+        month: 'Complete Booking',
         paymentDate: new Date().toISOString(),
         paymentMethod: method,
         transactionId,
         status: 'completed',
+        brokerageAmount: brokerageAmt,
         createdAt: new Date().toISOString()
       });
+
+      // Save Admin Earning (Brokerage)
+      if (brokerageAmt > 0) {
+        await addDoc(collection(db, 'adminEarnings'), {
+          type: 'brokerage',
+          amount: brokerageAmt,
+          userId: user.id,
+          propertyId: selectedRequestToPay.propertyId,
+          date: new Date().toISOString(),
+          createdAt: new Date().toISOString()
+        });
+      }
 
       if (prop?.ownerId) {
         await addDoc(collection(db, 'notifications'), {
           userId: prop.ownerId,
           type: 'payment',
-          message: `Tenant ${user.name} has paid ₹${amount} and secured ${prop.propertyTitle}. Property assigned.`,
+          message: `Booking Confirmed! Tenant ${user.name} has paid rent and security deposit to secure ${prop.propertyTitle}.`,
           status: 'unread',
           createdAt: new Date().toISOString()
         });
       }
 
       setIsRequestPayModalOpen(false);
-      setLastTxData({ id: transactionId, method, amount, month: 'Initial Security & Rent' });
+      setLastTxData({ id: transactionId, method, amount: totalAmt, month: 'Total Booking Payment' });
       setIsPaymentSuccessOpen(true);
       setSelectedRequestToPay(null);
 
@@ -471,7 +487,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       await createFirstRentRecord(
         user.id,
         selectedRequestToPay.propertyId,
-        selectedRequestToPay.totalRent || amount,
+        selectedRequestToPay.totalRent || rentAmt,
         selectedRequestToPay.selectedUnits
       ).catch(console.error);
     } catch (err) {
@@ -1633,14 +1649,30 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         {/* Payment Gateway Modal for Requests */}
         {selectedRequestToPay && (() => {
           const prop = allProperties.find(p => p.id === selectedRequestToPay.propertyId);
-          const totalAmount = (selectedRequestToPay.totalRent || prop?.rentAmount || 0) + (selectedRequestToPay.depositAmount || prop?.securityDeposit || 0);
+          const rentAmt = selectedRequestToPay.totalRent || prop?.rentAmount || 0;
+          const depAmt = selectedRequestToPay.depositAmount || prop?.securityDeposit || 0;
+          const brokerageAmt = rentAmt * 0.5; // Brokerage calculated as 50% of rent
+          const totalAmount = rentAmt + depAmt + brokerageAmt;
+          
           return (
             <PaymentModal
               isOpen={isRequestPayModalOpen}
               onClose={() => { setIsRequestPayModalOpen(false); setSelectedRequestToPay(null); }}
               amount={totalAmount}
-              month="Initial Security & Rent"
-              onPaymentSuccess={(method, txId) => handlePayRequest(method, txId, totalAmount)}
+              month="Booking Confirmation"
+              title="Complete Booking Payment"
+              subtitle={`For ${prop?.propertyTitle || 'Property'}`}
+              breakdown={[
+                { label: 'Rent (1 Month)', amount: rentAmt },
+                { label: 'Security Deposit', amount: depAmt },
+                { 
+                  label: 'Brokerage Fee (One-time platform fee)', 
+                  amount: brokerageAmt,
+                  isHighlighted: true,
+                  tooltip: 'Charged for connecting tenant and owner'
+                }
+              ]}
+              onPaymentSuccess={(method, txId) => handlePayRequest(method, txId, rentAmt, depAmt, brokerageAmt, totalAmount)}
             />
           );
         })()}
