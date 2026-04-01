@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../firebase';
-import { collection, getDocs, doc, deleteDoc, writeBatch, updateDoc, addDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, doc, deleteDoc, updateDoc, addDoc, onSnapshot, query } from 'firebase/firestore';
 import { User, Property, InterestRequest, AdminEarning } from '../types';
 import { Icons } from '../constants';
 import { Language } from '../translations';
@@ -20,6 +20,10 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
   const [properties, setProperties] = useState<Property[]>([]);
   const [requests, setRequests] = useState<any[]>([]);
 
+  // Settings
+  const [brokeragePercent, setBrokeragePercent] = useState<number>(30);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+
   // Property Filters
   const [propertyFilter, setPropertyFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [propertySearchToken, setPropertySearchToken] = useState('');
@@ -31,6 +35,14 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
       const usersSnap = await getDocs(collection(db, 'users'));
       const propsSnap = await getDocs(collection(db, 'properties'));
       const reqsSnap = await getDocs(collection(db, 'requests'));
+      const settingsSnap = await getDocs(collection(db, 'systemSettings'));
+
+      if (!settingsSnap.empty) {
+         const settingsData = settingsSnap.docs[0].data();
+         if (settingsData.brokeragePercentage !== undefined) {
+           setBrokeragePercent(settingsData.brokeragePercentage);
+         }
+      }
 
       setUsers(usersSnap.docs.map(doc => ({ id: doc.id, ...doc.data() })));
       setProperties(propsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }) as Property));
@@ -154,8 +166,27 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
          console.error(e);
          alert("Failed to clear demo data");
        } finally {
-         setLoading(false);
+          setLoading(false);
        }
+    }
+  };
+
+  const handleUpdateBrokerage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSavingSettings(true);
+    try {
+      const qs = await getDocs(collection(db, 'systemSettings'));
+      if (qs.empty) {
+         await addDoc(collection(db, 'systemSettings'), { brokeragePercentage: Number(brokeragePercent) });
+      } else {
+         await updateDoc(doc(db, 'systemSettings', qs.docs[0].id), { brokeragePercentage: Number(brokeragePercent) });
+      }
+      alert('Platform settings updated successfully!');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to update Settings');
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -375,20 +406,53 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
   const renderSettings = () => (
     <div className="animate-fadeIn">
       <h2 className="text-3xl font-extrabold text-gray-800 mb-6 drop-shadow-sm">Admin Controls</h2>
-      <div className="bg-white rounded-3xl p-8 shadow-xl border border-gray-100">
-        <div className="max-w-xl">
-           <h3 className="text-xl font-bold text-gray-800 mb-2">Danger Zone</h3>
-           <p className="text-gray-500 mb-6">These actions affect the platform permanently.</p>
-           
-           <div className="space-y-4">
-             <div className="flex justify-between items-center p-4 border border-red-200 rounded-2xl bg-red-50/50">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white rounded-3xl p-8 shadow-xl border border-gray-100">
+          <div className="max-w-xl">
+             <h3 className="text-xl font-bold text-gray-800 mb-2">Platform Settings</h3>
+             <p className="text-gray-500 mb-6">Manage global fees and platform variables.</p>
+             
+             <form onSubmit={handleUpdateBrokerage} className="space-y-4">
                <div>
-                 <h4 className="font-bold text-red-800">Clear All Demo Data</h4>
-                 <p className="text-sm text-red-600">Delete all test users and properties quickly.</p>
+                 <label className="block text-sm font-bold text-gray-700 mb-2">Brokerage Commission (%)</label>
+                 <div className="flex items-center gap-3">
+                   <div className="relative flex-1">
+                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold">%</span>
+                     <input 
+                       type="number" 
+                       required 
+                       min="0"
+                       max="100"
+                       value={brokeragePercent}
+                       onChange={(e) => setBrokeragePercent(Number(e.target.value))}
+                       className="w-full pl-9 pr-4 py-3 border border-gray-200 rounded-xl focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-bold" 
+                     />
+                   </div>
+                   <button type="submit" disabled={isSavingSettings} className="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-xl shadow-lg shadow-indigo-200 transition-all whitespace-nowrap">
+                     {isSavingSettings ? 'Saving...' : 'Update Config'}
+                   </button>
+                 </div>
+                 <p className="text-xs text-gray-500 mt-2">Deducted from tenant connection confirmation based on the first month's rent. Default: 30%</p>
                </div>
-               <button onClick={handleClearDemoData} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-xl shadow-lg shadow-red-200 transition-all">Clear Data</button>
+             </form>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-3xl p-8 shadow-xl border border-gray-100">
+          <div className="max-w-xl">
+             <h3 className="text-xl font-bold text-gray-800 mb-2">Danger Zone</h3>
+             <p className="text-gray-500 mb-6">These actions affect the platform permanently.</p>
+             
+             <div className="space-y-4">
+               <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center p-4 border border-red-200 rounded-2xl bg-red-50/50 gap-4">
+                 <div>
+                   <h4 className="font-bold text-red-800">Clear All Demo Data</h4>
+                   <p className="text-sm text-red-600">Delete all test users and properties quickly.</p>
+                 </div>
+                 <button onClick={handleClearDemoData} className="bg-red-500 hover:bg-red-600 text-white font-bold py-2 px-6 rounded-xl shadow-lg shadow-red-200 transition-all w-full sm:w-auto">Clear Data</button>
+               </div>
              </div>
-           </div>
+          </div>
         </div>
       </div>
     </div>
@@ -427,7 +491,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
           <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 hover:-translate-y-1 transition-transform border-t-4 border-t-amber-500">
             <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Brokerage Income</p>
             <h4 className="text-3xl font-black text-amber-600 mt-2">₹{brokerageTotal.toLocaleString('en-IN')}</h4>
-            <div className="mt-2 text-xs text-gray-400 bg-amber-50 px-2 py-1 rounded w-fit">50% of booking rent</div>
+            <div className="mt-2 text-xs text-gray-400 bg-amber-50 px-2 py-1 rounded w-fit">{brokeragePercent}% of booking rent</div>
           </div>
         </div>
 

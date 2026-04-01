@@ -89,7 +89,23 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   // ── QR / UPI Copy State
   const [upiCopied, setUpiCopied] = useState(false);
 
+  // ── System Config
+  const [brokeragePercent, setBrokeragePercent] = useState(30);
+
   const t = TRANSLATIONS[lang];
+
+  // Fetch System Settings
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'systemSettings'), snap => {
+      if (!snap.empty) {
+        const data = snap.docs[0].data();
+        if (data.brokeragePercentage !== undefined) {
+          setBrokeragePercent(data.brokeragePercentage);
+        }
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // Fetch Available Properties and their Units
   useEffect(() => {
@@ -1651,7 +1667,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
           const prop = allProperties.find(p => p.id === selectedRequestToPay.propertyId);
           const rentAmt = selectedRequestToPay.totalRent || prop?.rentAmount || 0;
           const depAmt = selectedRequestToPay.depositAmount || prop?.securityDeposit || 0;
-          const brokerageAmt = rentAmt * 0.5; // Brokerage calculated as 50% of rent
+          const brokerageAmt = rentAmt * (brokeragePercent / 100); 
           const totalAmount = rentAmt + depAmt + brokerageAmt;
           
           return (
@@ -1666,7 +1682,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                 { label: 'Rent (1 Month)', amount: rentAmt },
                 { label: 'Security Deposit', amount: depAmt },
                 { 
-                  label: 'Brokerage Fee (One-time platform fee)', 
+                  label: 'One-time platform fee', 
                   amount: brokerageAmt,
                   isHighlighted: true,
                   tooltip: 'Charged for connecting tenant and owner'
