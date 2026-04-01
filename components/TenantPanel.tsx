@@ -281,6 +281,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
 
 
   const totalSelectedRent = selectedUnits.reduce((sum, u) => sum + u.rentAmount, 0);
+  const totalSelectedDeposit = selectedUnits.reduce((sum, u) => sum + (u.securityDeposit || 0), 0);
 
   const handleUnitToggle = (unit: PropertyUnit) => {
     setSelectedUnits(prev =>
@@ -360,7 +361,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         propertyId: selectedProperty.id,
         selectedUnits: selectedUnits.map(u => u.unitId),
         totalRent: totalSelectedRent,
-        depositAmount: selectedProperty.securityDeposit || 0,
+        depositAmount: totalSelectedDeposit || 0,
         idProofUrl: applyIdProofUrl,
         addressProofUrl: applyAddressProofUrl,
         profilePhotoUrl: applyProfilePhotoUrl,
@@ -1064,17 +1065,18 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                           <p className="text-xs font-semibold uppercase text-gray-400 mb-2 tracking-wider">Available Units</p>
                           <div className="space-y-1">
                             {prop.availableUnits.map(unit => (
-                              <div key={unit.unitId} className="flex justify-between items-center px-3 py-2 bg-[#EEF2FF] rounded-lg text-sm">
-                                <span className="font-semibold text-[#3730a3]">{unit.unitName} ({unit.roomSize})</span>
-                                <span className="font-bold text-[#4B5EAA]">₹{unit.rentAmount}<span className="text-xs font-normal text-gray-500">/mo</span></span>
+                              <div key={unit.unitId} className="flex flex-col px-3 py-2 bg-[#EEF2FF] rounded-lg text-sm">
+                                <div className="flex justify-between items-center">
+                                  <span className="font-semibold text-[#3730a3]">{unit.unitName} ({unit.roomSize})</span>
+                                  <span className="font-bold text-[#4B5EAA]">₹{unit.rentAmount}<span className="text-xs font-normal text-gray-500">/mo</span></span>
+                                </div>
+                                <div className="mt-2 text-xs text-gray-500">
+                                  <span className="font-semibold text-gray-700">Rent:</span> ₹{unit.rentAmount} | <span className="font-semibold text-gray-700">Deposit:</span> ₹{unit.securityDeposit || 0}
+                                </div>
                               </div>
                             ))}
                           </div>
                         </div>
-
-                        {prop.securityDeposit > 0 && (
-                          <p className="text-xs text-gray-500 mb-4">Security Deposit: <span className="font-bold text-gray-700">₹{prop.securityDeposit}</span></p>
-                        )}
 
                         <div className="mt-auto">
                           <Button onClick={() => handleApplyClick(prop)} variant="primary" fullWidth className="py-3 font-semibold shadow-md hover:bg-[#3D4D8C] transition-colors gap-2">
@@ -1201,9 +1203,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                 <span className="text-2xl font-bold text-green-700">₹{totalSelectedRent}/mo</span>
               </div>
             )}
-            {selectedProperty && selectedProperty.securityDeposit > 0 && (
+            {selectedUnits.length > 0 && (
               <div className="bg-yellow-50 border border-yellow-200 p-3 rounded-xl text-sm text-yellow-800">
-                Security Deposit: <strong>₹{selectedProperty.securityDeposit}</strong> (payable to owner on approval)
+                Total Security Deposit: <strong>₹{selectedUnits.reduce((sum, u) => sum + (u.securityDeposit || 0), 0)}</strong> (payable to owner on approval)
               </div>
             )}
             <div className="bg-[#E3F2FD] p-4 rounded-xl border border-[#BBDEFB]">

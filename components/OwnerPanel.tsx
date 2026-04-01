@@ -43,11 +43,11 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     propertyTitle: '',
     location: '',
     rentAmount: '',
-    securityDeposit: '',
+    securityDeposit: '', // Keep for backward compat, but hide in UI
     description: '',
     propertyType: PropertyType.FLAT,
     availabilityStatus: 'available',
-    units: [{ unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] as PropertyUnit[]
+    units: [{ unitId: `unit_${Date.now()}`, unitName: '', floor: '', type: '', roomSize: '', rentAmount: 0, securityDeposit: 0, status: 'vacant' }] as PropertyUnit[]
   });
   const [addingProperty, setAddingProperty] = useState(false);
   const [newPropertyImages, setNewPropertyImages] = useState<File[]>([]);
@@ -68,7 +68,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   // Edit Unit State
   const [isEditUnitModalOpen, setIsEditUnitModalOpen] = useState(false);
   const [editingUnit, setEditingUnit] = useState<PropertyUnit | null>(null);
-  const [editUnitData, setEditUnitData] = useState({ unitName: '', roomSize: '', rentAmount: '' });
+  const [editUnitData, setEditUnitData] = useState({ unitName: '', floor: '', type: '', roomSize: '', rentAmount: '', securityDeposit: '' });
 
   // Units Management State
   const [selectedPropertyForUnits, setSelectedPropertyForUnits] = useState<Property | null>(null);
@@ -608,7 +608,15 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     if (!selectedPropertyForUnits || !editingUnit) return;
     try {
       const updatedUnits = selectedPropertyForUnits.units?.map(u =>
-        u.unitId === editingUnit.unitId ? { ...u, unitName: editUnitData.unitName, roomSize: editUnitData.roomSize, rentAmount: Number(editUnitData.rentAmount) } : u
+        u.unitId === editingUnit.unitId ? { 
+          ...u, 
+          unitName: editUnitData.unitName, 
+          floor: editUnitData.floor,
+          type: editUnitData.type,
+          roomSize: editUnitData.roomSize, 
+          rentAmount: Number(editUnitData.rentAmount),
+          securityDeposit: Number(editUnitData.securityDeposit)
+        } : u
       ) || [];
       await updateDoc(doc(db, 'properties', selectedPropertyForUnits.id), { units: updatedUnits });
       alert("Unit details updated!");
@@ -1594,10 +1602,6 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               {newPropertyImages.length > 0 && <p className="text-xs text-gray-500 mt-1 pl-1">{newPropertyImages.length} images selected.</p>}
             </div>
             <div>
-              <label className="block text-sm font-medium text-[#2D3436] mb-1">Security Deposit (₹) <span className="text-gray-400 font-normal">(Optional)</span></label>
-              <input type="number" value={newProperty.securityDeposit} onChange={e => setNewProperty({ ...newProperty, securityDeposit: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="30000" />
-            </div>
-            <div>
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Property Type</label>
               <select value={newProperty.propertyType} onChange={e => setNewProperty({ ...newProperty, propertyType: e.target.value as PropertyType })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]">
                 {Object.values(PropertyType).map(type => (
@@ -1616,31 +1620,64 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
             <div className="border border-[#EAEAEA] rounded-xl p-4 bg-gray-50 mt-4">
               <div className="flex justify-between items-center mb-4">
                 <label className="block text-sm font-medium text-[#2D3436]">Units / Flats</label>
-                <Button type="button" variant="outline" className="!text-xs !px-2 !py-1" onClick={() => setNewProperty({ ...newProperty, units: [...newProperty.units, { unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] })}>+ Add Unit</Button>
+                <Button type="button" variant="outline" className="!text-xs !px-2 !py-1" onClick={() => setNewProperty({ ...newProperty, units: [...newProperty.units, { unitId: `unit_${Date.now()}`, unitName: '', floor: '', type: '', roomSize: '', rentAmount: 0, securityDeposit: 0, status: 'vacant' }] })}>+ Add Unit</Button>
               </div>
               <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
                 {newProperty.units.map((unit, index) => (
-                  <div key={unit.unitId} className="flex gap-2 items-center bg-white p-3 rounded-lg border border-[#EAEAEA]">
-                    <input className="flex-1 w-full p-2 border border-[#EAEAEA] rounded text-sm" placeholder="Unit Name (e.g. 101)" value={unit.unitName} onChange={e => {
-                      const newUnits = [...newProperty.units];
-                      newUnits[index].unitName = e.target.value;
-                      setNewProperty({ ...newProperty, units: newUnits });
-                    }} required />
-                    <input className="w-24 p-2 border border-[#EAEAEA] rounded text-sm" placeholder="1BHK / Size" value={unit.roomSize} onChange={e => {
-                      const newUnits = [...newProperty.units];
-                      newUnits[index].roomSize = e.target.value;
-                      setNewProperty({ ...newProperty, units: newUnits });
-                    }} required />
-                    <input className="w-28 p-2 border border-[#EAEAEA] rounded text-sm" type="number" placeholder="Rent (₹)" value={unit.rentAmount || ''} onChange={e => {
-                      const newUnits = [...newProperty.units];
-                      newUnits[index].rentAmount = Number(e.target.value);
-                      setNewProperty({ ...newProperty, units: newUnits });
-                    }} required />
-                    {newProperty.units.length > 1 && (
-                      <button type="button" className="text-red-500 font-bold px-2 hover:bg-red-50 rounded" onClick={() => {
-                        setNewProperty({ ...newProperty, units: newProperty.units.filter((_, i) => i !== index) });
-                      }}>×</button>
-                    )}
+                  <div key={unit.unitId} className="flex flex-col gap-2 items-start bg-white p-3 rounded-lg border border-[#EAEAEA]">
+                    <div className="flex justify-between w-full">
+                      <span className="text-xs font-bold text-gray-500 uppercase">Unit Configuration</span>
+                      {newProperty.units.length > 1 && (
+                        <button type="button" className="text-red-500 font-bold px-2 hover:bg-red-50 rounded" onClick={() => {
+                          setNewProperty({ ...newProperty, units: newProperty.units.filter((_, i) => i !== index) });
+                        }}>Remove</button>
+                      )}
+                    </div>
+                    
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 w-full">
+                      <input className="w-full p-2 border border-[#EAEAEA] rounded text-sm" placeholder="Name (e.g. 101)" value={unit.unitName} onChange={e => {
+                        const newUnits = [...newProperty.units];
+                        newUnits[index].unitName = e.target.value;
+                        setNewProperty({ ...newProperty, units: newUnits });
+                      }} required />
+                      <input className="w-full p-2 border border-[#EAEAEA] rounded text-sm" placeholder="Floor (e.g. 1st Floor)" value={unit.floor} onChange={e => {
+                        const newUnits = [...newProperty.units];
+                        newUnits[index].floor = e.target.value;
+                        setNewProperty({ ...newProperty, units: newUnits });
+                      }} required />
+                      <input className="w-full p-2 border border-[#EAEAEA] rounded text-sm" placeholder="Type (e.g. 2BHK)" value={unit.type} onChange={e => {
+                        const newUnits = [...newProperty.units];
+                        newUnits[index].type = e.target.value;
+                        setNewProperty({ ...newProperty, units: newUnits });
+                      }} required />
+                      <input className="w-full p-2 border border-[#EAEAEA] rounded text-sm" placeholder="Size (e.g. 1000 sqft)" value={unit.roomSize} onChange={e => {
+                        const newUnits = [...newProperty.units];
+                        newUnits[index].roomSize = e.target.value;
+                        setNewProperty({ ...newProperty, units: newUnits });
+                      }} />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 w-full mt-1">
+                      <div>
+                        <label className="text-xs text-gray-500 font-semibold mb-1 block">Monthly Rent (₹)</label>
+                        <input className="w-full p-2 border border-[#EAEAEA] rounded text-sm bg-blue-50 focus:bg-white" type="number" placeholder="Rent (₹)" value={unit.rentAmount || ''} onChange={e => {
+                          const newUnits = [...newProperty.units];
+                          newUnits[index].rentAmount = Number(e.target.value);
+                          setNewProperty({ ...newProperty, units: newUnits });
+                        }} required min="0" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 font-semibold mb-1 block">Security Deposit (₹)</label>
+                        <input className="w-full p-2 border border-[#EAEAEA] rounded text-sm bg-purple-50 focus:bg-white" type="number" placeholder="Security Deposit (₹)" value={unit.securityDeposit || ''} onChange={e => {
+                          const newUnits = [...newProperty.units];
+                          newUnits[index].securityDeposit = Number(e.target.value);
+                          setNewProperty({ ...newProperty, units: newUnits });
+                        }} required min={unit.rentAmount || 0} />
+                        {(unit.securityDeposit || 0) < (unit.rentAmount || 0) && (
+                           <p className="text-[10px] text-red-500 mt-0.5">Deposit usually &gt;= rent</p>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>

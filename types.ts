@@ -99,8 +99,11 @@ export interface Property {
 export interface PropertyUnit {
   unitId: string;
   unitName: string;
+  floor?: string;
+  type?: string;
   roomSize: string;
   rentAmount: number;
+  securityDeposit?: number;
   status: 'vacant' | 'occupied';
   tenantId?: string;
   createdAt?: string;
