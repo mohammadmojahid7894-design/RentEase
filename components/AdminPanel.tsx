@@ -21,7 +21,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
   const [requests, setRequests] = useState<any[]>([]);
 
   // Settings
-  const [brokeragePercent, setBrokeragePercent] = useState<number>(30);
+  const [brokeragePercent, setBrokeragePercent] = useState<number>(25);
   const [isSavingSettings, setIsSavingSettings] = useState(false);
 
   // Property Filters
@@ -432,7 +432,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
                      {isSavingSettings ? 'Saving...' : 'Update Config'}
                    </button>
                  </div>
-                 <p className="text-xs text-gray-500 mt-2">Deducted from tenant connection confirmation based on the first month's rent. Default: 30%</p>
+                 <p className="text-xs text-gray-500 mt-2">Deducted from tenant connection confirmation based on the first month's rent. Default: 25%</p>
                </div>
              </form>
           </div>

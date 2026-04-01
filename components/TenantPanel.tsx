@@ -90,7 +90,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const [upiCopied, setUpiCopied] = useState(false);
 
   // ── System Config
-  const [brokeragePercent, setBrokeragePercent] = useState(30);
+  const [brokeragePercent, setBrokeragePercent] = useState(25);
 
   const t = TRANSLATIONS[lang];
 
@@ -1682,7 +1682,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                 { label: 'Rent (1 Month)', amount: rentAmt },
                 { label: 'Security Deposit', amount: depAmt },
                 { 
-                  label: 'One-time platform fee', 
+                  label: `Brokerage (${brokeragePercent}% of monthly rent, One-time platform fee)`, 
                   amount: brokerageAmt,
                   isHighlighted: true,
                   tooltip: 'Charged for connecting tenant and owner'
