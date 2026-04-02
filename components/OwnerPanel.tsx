@@ -109,14 +109,13 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
 
   // ── Financial Summary ─────────────────────────────────────────────────────
   const [financialStats, setFinancialStats] = useState({
-    totalMonthlyRent: 0, totalPaid: 0, totalPending: 0, totalLate: 0, lateCount: 0, totalLateFees: 0, overdueCount: 0
+    totalMonthlyRent: 0, totalPaid: 0, totalPending: 0, totalLate: 0, lateCount: 0, totalLateFees: 0, overdueCount: 0, totalDeposit: 0
   });
 
   // ── Occupied tenants map (for notice form dropdown) ───────────────────────
   const [occupiedTenants, setOccupiedTenants] = useState<{ tenantId: string; name: string; phone: string; propertyId: string; propertyTitle: string }[]>([]);
 
   // Monetization State
-  const [isSubscriptionModalOpen, setIsSubscriptionModalOpen] = useState(false);
   const [isListingFeeModalOpen, setIsListingFeeModalOpen] = useState(false);
 
   const t = TRANSLATIONS[lang];
@@ -279,9 +278,10 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     const lateCount = overdueRecords.length;
     const totalLateFees = overdueRecords.reduce((s, r) => s + (r.lateFee || 0), 0);
     const overdueCount = overdueRecords.length;
+    const totalDeposit = payments.filter(p => p.type === 'security_deposit').reduce((s, p) => s + p.amount, 0);
 
-    setFinancialStats({ totalMonthlyRent, totalPaid, totalPending, totalLate, lateCount, totalLateFees, overdueCount });
-  }, [rentRecords, ownerStats.totalMonthlyRentConfigured]);
+    setFinancialStats({ totalMonthlyRent, totalPaid, totalPending, totalLate, lateCount, totalLateFees, overdueCount, totalDeposit });
+  }, [rentRecords, ownerStats.totalMonthlyRentConfigured, payments]);
 
 
 
@@ -481,7 +481,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
 
       // Track Admin Earning
       await addDoc(collection(db, 'adminEarnings'), {
-        type: 'listing',
+        type: 'listing_fee',
         amount: 49,
         userId: user.id,
         propertyId: newPropRef.id,
@@ -511,49 +511,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     }
   };
 
-  const handleSubscriptionSuccess = async (method: string, transactionId: string) => {
-    try {
-      const uQ = query(collection(db, 'users'), where('userId', '==', user.id));
-      const uSnap = await getDocs(uQ);
-      if (!uSnap.empty) {
-        const userDocId = uSnap.docs[0].id;
-        const subscriptionDate = new Date().toISOString();
-        const expiryDate = new Date();
-        expiryDate.setMonth(expiryDate.getMonth() + 1);
-        
-        await updateDoc(doc(db, 'users', userDocId), {
-          isPremium: true,
-          planType: 'premium',
-          subscriptionDate,
-          expiryDate: expiryDate.toISOString()
-        });
-        
-        // Save Admin Earning
-        await addDoc(collection(db, 'adminEarnings'), {
-          type: 'subscription',
-          amount: 199,
-          userId: user.id,
-          date: new Date().toISOString(),
-          createdAt: new Date().toISOString()
-        });
-
-        // Update local session
-        await login({...user, isPremium: true, planType: 'premium'});
-        
-        setIsSubscriptionModalOpen(false);
-        alert('Welcome to Premium! You can now list unlimited properties.');
-      }
-    } catch(err) {
-      console.error(err);
-      alert('Failed to activate premium.');
-    }
-  };
-
   const handleAddNewPropertyClick = () => {
-    if (user.planType !== 'premium' && properties.length >= 1) {
-      setIsSubscriptionModalOpen(true);
-      return;
-    }
     setIsPropertyModalOpen(true);
   };
 
@@ -946,14 +904,6 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                   ID: {user.systemId}
                 </span>
               )}
-              <span className={`inline-block mt-1 px-3 py-1 text-xs font-bold rounded-full ${user.planType === 'premium' ? 'bg-gradient-to-r from-amber-200 to-yellow-400 text-yellow-900 border border-yellow-500 shadow-sm' : 'bg-gray-200 text-gray-700'}`}>
-                {user.planType === 'premium' ? '👑 Premium Plan' : 'Free Plan'}
-              </span>
-              {user.planType !== 'premium' && (
-                <Button onClick={() => setIsSubscriptionModalOpen(true)} className="ml-3 !px-3 !py-1 !text-xs !bg-gradient-to-r !from-purple-600 !to-indigo-600 border-none shadow-md hover:shadow-lg transition-all !text-white font-bold">
-                  Upgrade to Premium
-                </Button>
-              )}
             </div>
           </div>
         </div>
@@ -1275,7 +1225,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <div className="text-center p-12 bg-white rounded-2xl border border-dashed border-[#EAEAEA]"><p className="text-lg text-gray-500">No payments recorded yet.</p></div>
             ) : (
               <div className="space-y-4">
-                {payments.map(payment => {
+                {payments.filter(payment => !payment.type || payment.type === 'rent' || payment.type === 'security_deposit').map(payment => {
                   const prop = properties.find(p => p.id === payment.propertyId);
                   const tnt = (tenants[payment.tenantId] || manualTenants[payment.tenantId]) as any;
                   const tntName = tnt ? (tnt.tenantName || tnt.name || 'Tenant') : payment.tenantId.substring(0, 8);
@@ -1284,6 +1234,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                       <div>
                         <div className="flex items-center gap-2 mb-1">
                           <span className="px-2 py-0.5 rounded-full text-xs font-bold uppercase bg-green-100 text-green-700">Paid</span>
+                          <span className="px-2 py-0.5 rounded-full text-xs font-bold uppercase bg-blue-100 text-blue-700">{payment.type === 'security_deposit' ? 'Deposit' : 'Rent'}</span>
                           <span className="text-xs text-gray-400">{new Date(payment.createdAt).toLocaleDateString()}</span>
                         </div>
                         <p className="font-bold text-gray-800">{prop?.propertyTitle || 'Property'}</p>
@@ -1372,6 +1323,11 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                 <p className="text-xs font-semibold uppercase tracking-wider opacity-80 mb-1">Late Payments</p>
                 <p className="text-3xl font-bold">₹{financialStats.totalLate.toLocaleString('en-IN')}</p>
                 <p className="text-xs opacity-60 mt-1">{financialStats.lateCount} overdue</p>
+              </div>
+              <div className="bg-gradient-to-br from-indigo-500 to-purple-600 p-5 rounded-2xl text-white shadow-md">
+                <p className="text-xs font-semibold uppercase tracking-wider opacity-80 mb-1">Total Security Deposit</p>
+                <p className="text-3xl font-bold">₹{financialStats.totalDeposit.toLocaleString('en-IN')}</p>
+                <p className="text-xs opacity-60 mt-1">Total deposits held</p>
               </div>
             </div>
 
@@ -1908,18 +1864,6 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
             title={newProperty.propertyTitle || 'Listing Fee'}
             subtitle="Property Listing Fee"
             onPaymentSuccess={handleAddPropertySubmit}
-          />
-        )}
-
-        {isSubscriptionModalOpen && (
-          <PaymentModal
-            isOpen={isSubscriptionModalOpen}
-            onClose={() => setIsSubscriptionModalOpen(false)}
-            amount={199}
-            month="Premium Plan"
-            title="Premium Plan"
-            subtitle="Subscription Upgrade"
-            onPaymentSuccess={handleSubscriptionSuccess}
           />
         )}
 

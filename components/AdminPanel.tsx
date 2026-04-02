@@ -460,8 +460,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
 
   const renderEarnings = () => {
     const total = adminEarnings.reduce((sum, item) => sum + item.amount, 0);
-    const listingTotal = adminEarnings.filter(e => e.type === 'listing').reduce((sum, item) => sum + item.amount, 0);
-    const subTotal = adminEarnings.filter(e => e.type === 'subscription').reduce((sum, item) => sum + item.amount, 0);
+    const listingTotal = adminEarnings.filter(e => e.type === 'listing' || e.type === 'listing_fee').reduce((sum, item) => sum + item.amount, 0);
     const brokerageTotal = adminEarnings.filter(e => e.type === 'brokerage').reduce((sum, item) => sum + item.amount, 0);
 
     const sortedEarnings = [...adminEarnings].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -477,16 +476,11 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
           <p className="text-emerald-50 mt-4 font-medium opacity-90">{adminEarnings.length} Total Transactions</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
           <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 hover:-translate-y-1 transition-transform border-t-4 border-t-blue-500">
             <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Listing Income</p>
             <h4 className="text-3xl font-black text-blue-600 mt-2">₹{listingTotal.toLocaleString('en-IN')}</h4>
             <div className="mt-2 text-xs text-gray-400 bg-blue-50 px-2 py-1 rounded w-fit">₹49 per listing</div>
-          </div>
-          <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 hover:-translate-y-1 transition-transform border-t-4 border-t-purple-500">
-            <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Subscription Income</p>
-            <h4 className="text-3xl font-black text-purple-600 mt-2">₹{subTotal.toLocaleString('en-IN')}</h4>
-            <div className="mt-2 text-xs text-gray-400 bg-purple-50 px-2 py-1 rounded w-fit">₹199 / month</div>
           </div>
           <div className="bg-white rounded-3xl p-6 shadow-xl border border-gray-100 hover:-translate-y-1 transition-transform border-t-4 border-t-amber-500">
             <p className="text-sm font-bold text-gray-500 uppercase tracking-widest">Brokerage Income</p>
@@ -509,8 +503,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ user, lang, onLogout }) => {
             <tbody>
               {sortedEarnings.map(e => {
                  const typeStyle = 
-                    e.type === 'listing' ? 'bg-blue-100 text-blue-700' :
-                    e.type === 'subscription' ? 'bg-purple-100 text-purple-700' :
+                    (e.type === 'listing' || e.type === 'listing_fee') ? 'bg-blue-100 text-blue-700' :
                     'bg-amber-100 text-amber-700';
                  return (
                    <tr key={e.id} className="border-b border-gray-50 hover:bg-gray-50/50 transition-colors">

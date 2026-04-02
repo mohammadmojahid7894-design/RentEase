@@ -56,10 +56,6 @@ export interface User {
     idProofUrl?: string;
     profilePhotoUrl?: string;
   };
-  isPremium?: boolean;
-  planType?: 'free' | 'premium';
-  subscriptionDate?: string;
-  expiryDate?: string;
 }
 
 export interface Property {
@@ -197,6 +193,7 @@ export interface RentPaymentRecord {
   status: 'completed';
   transactionId?: string;
   brokerageAmount?: number;
+  type?: 'rent' | 'security_deposit' | 'brokerage' | 'listing_fee';
   createdAt: string;
 }
 
@@ -234,7 +231,7 @@ export interface AppNotification {
 // ── Admin Earnings ────────────────────────────────────────────────────────────
 export interface AdminEarning {
   id?: string;
-  type: 'listing' | 'subscription' | 'brokerage';
+  type: 'listing_fee' | 'brokerage';
   amount: number;
   userId: string;
   propertyId?: string;

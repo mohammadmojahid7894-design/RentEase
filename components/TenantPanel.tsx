@@ -463,15 +463,32 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         ownerId: prop?.ownerId || '',
         propertyId: selectedRequestToPay.propertyId,
         requestId: selectedRequestToPay.id,
-        amount: totalAmt,
-        month: 'Complete Booking',
+        amount: rentAmt,
+        month: 'First Month Rent',
         paymentDate: new Date().toISOString(),
         paymentMethod: method,
         transactionId,
         status: 'completed',
-        brokerageAmount: brokerageAmt,
+        type: 'rent',
         createdAt: new Date().toISOString()
       });
+
+      if (depositAmt > 0) {
+        await addDoc(collection(db, 'rent_payments'), {
+          tenantId: user.id,
+          ownerId: prop?.ownerId || '',
+          propertyId: selectedRequestToPay.propertyId,
+          requestId: selectedRequestToPay.id,
+          amount: depositAmt,
+          month: 'Security Deposit',
+          paymentDate: new Date().toISOString(),
+          paymentMethod: method,
+          transactionId,
+          status: 'completed',
+          type: 'security_deposit',
+          createdAt: new Date().toISOString()
+        });
+      }
 
       // Save Admin Earning (Brokerage)
       if (brokerageAmt > 0) {
@@ -571,6 +588,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
         paymentMethod: method,
         transactionId,
         status: 'completed',
+        type: 'rent',
         createdAt: new Date().toISOString()
       });
 
