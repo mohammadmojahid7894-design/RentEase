@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot, orderBy, deleteDoc } from 'firebase/firestore';
 import { uploadImage } from "../cloudinary";
 import { useAuth } from '../contexts/AuthContext';
-import { getDaysOverdue, calculateLateFee, createNextCycleRecord } from '../utils/rentCycle';
+import { getDaysOverdue, calculateLateFee, createNextCycleRecord, formatDate } from '../utils/rentCycle';
 import { Icons } from '../constants';
 import Button from './Button';
 import Layout from './Layout';
@@ -1249,7 +1249,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                         <p className="font-bold text-gray-800">{prop?.propertyTitle || 'Property'}</p>
                         <p className="text-sm text-gray-500">Tenant: <span className="font-semibold text-gray-700">{tntName}</span></p>
                         <p className="text-sm text-gray-500">Month: {payment.month}</p>
-                        <p className="text-xs text-gray-400 mt-1">Method: {payment.paymentMethod} | Paid: {new Date(payment.paymentDate).toLocaleDateString()}</p>
+                        <p className="text-xs text-gray-400 mt-1">Method: {payment.paymentMethod} | Paid: {formatDate(payment.paymentDate)}</p>
                       </div>
                       <p className="text-2xl font-bold text-green-600">₹{payment.amount}</p>
                     </div>
@@ -1278,7 +1278,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                     </div>
                     <div className="flex-1">
                       <p className={`text-sm ${notif.status === 'unread' ? 'font-bold text-gray-900' : 'text-gray-700'}`}>{notif.message}</p>
-                      <p className="text-xs text-gray-400 mt-1">{new Date(notif.createdAt).toLocaleString()}</p>
+                      <p className="text-xs text-gray-400 mt-1">{formatDate(notif.createdAt, true)}</p>
                     </div>
                     {notif.status === 'unread' && <span className="w-2.5 h-2.5 rounded-full bg-[#4B5EAA] shrink-0 mt-1 flex-none"></span>}
                   </div>
@@ -1365,7 +1365,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                             <td className="p-3 font-medium text-gray-800">{tntName}</td>
                             <td className="p-3 text-gray-600">{rec.month}</td>
                             <td className="p-3 font-bold text-[#4B5EAA]">₹{rec.rentAmount.toLocaleString('en-IN')}</td>
-                            <td className="p-3 text-gray-600">{rec.dueDate}</td>
+                            <td className="p-3 text-gray-600">{formatDate(rec.dueDate)}</td>
                             <td className="p-3">
                               <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${rec.status === 'paid' ? 'bg-green-100 text-green-700' : rec.status === 'late' ? 'bg-red-100 text-red-700' : 'bg-yellow-100 text-yellow-700'}`}>{rec.status}</span>
                             </td>
@@ -1429,17 +1429,17 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                           {isOverdue && daysOver > 0 && (
                             <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">{daysOver} day{daysOver > 1 ? 's' : ''} late</span>
                           )}
-                          <span className="text-xs text-gray-400">{new Date(rec.createdAt).toLocaleDateString()}</span>
+                          <span className="text-xs text-gray-400">{formatDate(rec.createdAt)}</span>
                         </div>
                         <p className="font-bold text-gray-800">{prop?.propertyTitle || 'Property'}</p>
                         <p className="text-sm text-gray-500">Tenant: <span className="font-semibold text-gray-700">{tntName}</span></p>
-                        <p className="text-sm text-gray-600 mt-1">Month: <strong>{rec.month}</strong> | Due: <strong>{new Date(rec.dueDate).toLocaleDateString()}</strong></p>
+                        <p className="text-sm text-gray-600 mt-1">Month: <strong>{rec.month}</strong> | Due: <strong>{formatDate(rec.dueDate)}</strong></p>
                         {isOverdue && currentLateFee > 0 && (
                           <p className="text-sm text-red-700 font-semibold mt-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-200">
                             Late Fee: ₹{currentLateFee.toLocaleString('en-IN')} (2% flat penalty)
                           </p>
                         )}
-                        {rec.paymentDate && <p className="text-xs text-green-600 mt-1">Paid on: {new Date(rec.paymentDate).toLocaleDateString()}</p>}
+                        {rec.paymentDate && <p className="text-xs text-green-600 mt-1">Paid on: {formatDate(rec.paymentDate)}</p>}
                       </div>
                       <div className="text-right flex flex-col items-end gap-2">
                         <p className={`text-2xl font-bold ${isOverdue ? 'text-red-600' : 'text-[#4B5EAA]'}`}>

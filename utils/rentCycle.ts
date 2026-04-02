@@ -16,6 +16,29 @@ export const getMonthLabel = (dateStr: string): string => {
   return d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 };
 
+// ── Format readable date (02 May 2026) ──────────────────────────────────────
+export const formatDate = (dateStr: string | null | undefined, includeTime: boolean = false): string => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return dateStr;
+  
+  if (includeTime) {
+    return d.toLocaleString('en-IN', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  }
+  
+  return d.toLocaleDateString('en-IN', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+};
+
 // ── Calculate days overdue ──────────────────────────────────────────────────
 export const getDaysOverdue = (dueDate: string): number => {
   const now = new Date();

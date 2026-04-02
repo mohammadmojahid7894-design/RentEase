@@ -4,7 +4,7 @@ import { User, Property, InterestRequest, PropertyUnit, RentNotice, AppNotificat
 import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot } from 'firebase/firestore';
 import { uploadImage } from '../cloudinary';
-import { createFirstRentRecord, createNextCycleRecord, processRentCycles, getDaysOverdue, calculateLateFee } from '../utils/rentCycle';
+import { createFirstRentRecord, createNextCycleRecord, processRentCycles, getDaysOverdue, calculateLateFee, formatDate } from '../utils/rentCycle';
 import { Icons } from '../constants';
 import Button from './Button';
 import Layout from './Layout';
@@ -1148,7 +1148,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                           <span className={`px-3 py-1 rounded-full text-xs font-bold uppercase shadow-sm border ${getBadgeStyle()}`}>
                             {getBadgeText()}
                           </span>
-                          <span className="text-sm text-gray-400 font-medium">Applied on {new Date(req.createdAt).toLocaleDateString()}</span>
+                          <span className="text-sm text-gray-400 font-medium">Applied on {formatDate(req.createdAt)}</span>
                         </div>
                         <h4 className="text-xl font-bold text-[#2D3436] mt-3">
                           {prop ? prop.propertyTitle : <span className="text-gray-400 italic">Property Unavailable</span>}
@@ -1352,10 +1352,10 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
                           <span className={`px-2 py-0.5 rounded-full text-xs font-bold uppercase ${notice.status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{notice.status}</span>
-                          <span className="text-xs text-gray-400">{new Date(notice.createdAt).toLocaleDateString()}</span>
+                          <span className="text-xs text-gray-400">{formatDate(notice.createdAt)}</span>
                         </div>
                         <p className="font-bold text-gray-800 text-lg">{prop?.propertyTitle || 'Your Property'}</p>
-                        <p className="text-sm text-gray-600 mt-1">Month: <strong>{notice.month}</strong> | Due: <strong>{notice.dueDate}</strong></p>
+                        <p className="text-sm text-gray-600 mt-1">Month: <strong>{notice.month}</strong> | Due: <strong>{formatDate(notice.dueDate)}</strong></p>
                         <p className="text-sm text-gray-500 italic mt-1">"{notice.message}"</p>
                       </div>
                       <div className="text-right flex flex-col items-end gap-2">
@@ -1429,7 +1429,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                         </div>
                         <p className={`text-sm ${notif.status === 'unread' ? 'font-bold text-gray-900' : 'text-gray-700'}`}>{notif.message}</p>
                         <div className="flex items-center gap-3 mt-1.5">
-                          <p className="text-xs text-gray-400">{new Date(notif.createdAt).toLocaleString()}</p>
+                          <p className="text-xs text-gray-400">{formatDate(notif.createdAt, true)}</p>
                           {notif.status === 'unread' && notif.id && (
                             <button
                               onClick={() => updateDoc(doc(db, 'notifications', notif.id!), { status: 'read' })}
@@ -1505,19 +1505,19 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                               {isOverdue && daysOver > 0 && (
                                 <span className="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full font-bold">{daysOver} day{daysOver > 1 ? 's' : ''} late</span>
                               )}
-                              <span className="text-xs text-gray-400">{new Date(rec.dueDate).toLocaleDateString()}</span>
+                              <span className="text-xs text-gray-400">{formatDate(rec.dueDate)}</span>
                             </div>
                             <p className="font-bold text-gray-800">{prop?.propertyTitle || 'Property'}</p>
-                            <p className="text-sm text-gray-600 mt-1">Month: <strong>{rec.month}</strong> | Due: <strong>{new Date(rec.dueDate).toLocaleDateString()}</strong></p>
+                            <p className="text-sm text-gray-600 mt-1">Month: <strong>{rec.month}</strong> | Due: <strong>{formatDate(rec.dueDate)}</strong></p>
                             {rec.nextDueDate && rec.status === 'paid' && (
-                              <p className="text-xs text-blue-600 mt-1">Next due: {new Date(rec.nextDueDate).toLocaleDateString()}</p>
+                              <p className="text-xs text-blue-600 mt-1">Next due: {formatDate(rec.nextDueDate)}</p>
                             )}
                             {isOverdue && currentLateFee > 0 && (
                               <p className="text-sm text-red-700 font-semibold mt-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-200">
                                 ⚠️ Overdue + Fine added: ₹{currentLateFee.toLocaleString('en-IN')} (2% penalty)
                               </p>
                             )}
-                            {rec.paymentDate && <p className="text-xs text-green-600 mt-1">Paid on: {new Date(rec.paymentDate).toLocaleDateString()}</p>}
+                            {rec.paymentDate && <p className="text-xs text-green-600 mt-1">Paid on: {formatDate(rec.paymentDate)}</p>}
                           </div>
                           <div className="text-right flex flex-col items-end gap-2">
                             <p className={`text-2xl font-bold ${isOverdue ? 'text-red-600' : 'text-[#4B5EAA]'}`}>
@@ -1579,7 +1579,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                                 <td className="p-3 font-medium text-gray-800">{pay.month}</td>
                                 <td className="p-3 font-bold text-green-600">₹{pay.amount.toLocaleString('en-IN')}</td>
                                 <td className="p-3 text-gray-600">{pay.paymentMethod}</td>
-                                <td className="p-3 text-gray-600">{new Date(pay.paymentDate).toLocaleDateString()}</td>
+                                <td className="p-3 text-gray-600">{formatDate(pay.paymentDate)}</td>
                                 <td className="p-3"><span className="px-2 py-0.5 rounded-full text-xs font-bold uppercase bg-green-100 text-green-700">Completed</span></td>
                               </tr>
                             ))}
