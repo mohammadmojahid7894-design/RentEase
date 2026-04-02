@@ -4,7 +4,7 @@ import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, doc, onSnapshot, orderBy, deleteDoc } from 'firebase/firestore';
 import { uploadImage } from "../cloudinary";
 import { useAuth } from '../contexts/AuthContext';
-import { getDaysOverdue, calculateLateFee } from '../utils/rentCycle';
+import { getDaysOverdue, calculateLateFee, createNextCycleRecord } from '../utils/rentCycle';
 import { Icons } from '../constants';
 import Button from './Button';
 import Layout from './Layout';
@@ -833,6 +833,15 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         createdAt: new Date().toISOString()
       });
 
+      // Auto-create next cycle rent record
+      await createNextCycleRecord(
+        record.tenantId,
+        record.propertyId,
+        record.rentAmount,
+        record.dueDate,
+        record.unitId
+      ).catch(console.error);
+
       await addDoc(collection(db, 'notifications'), {
         userId: record.tenantId,
         type: 'payment',
@@ -1402,7 +1411,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                   const tntName = tnt ? (tnt.tenantName || tnt.name || 'Tenant') : rec.tenantId.substring(0, 8);
                   const isOverdue = rec.status === 'overdue' || rec.status === 'late';
                   const daysOver = isOverdue ? getDaysOverdue(rec.dueDate) : 0;
-                  const currentLateFee = isOverdue ? calculateLateFee(rec.dueDate, rec.lateFeePerDay || 100) : 0;
+                  const currentLateFee = isOverdue ? Math.round(rec.rentAmount * 0.02) : 0;
 
                   return (
                     <div key={rec.id} className={`bg-white p-5 rounded-2xl border shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4 ${
@@ -1427,7 +1436,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                         <p className="text-sm text-gray-600 mt-1">Month: <strong>{rec.month}</strong> | Due: <strong>{new Date(rec.dueDate).toLocaleDateString()}</strong></p>
                         {isOverdue && currentLateFee > 0 && (
                           <p className="text-sm text-red-700 font-semibold mt-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-200">
-                            Late Fee: ₹{currentLateFee.toLocaleString('en-IN')} (₹{rec.lateFeePerDay || 100}/day × {daysOver} days)
+                            Late Fee: ₹{currentLateFee.toLocaleString('en-IN')} (2% flat penalty)
                           </p>
                         )}
                         {rec.paymentDate && <p className="text-xs text-green-600 mt-1">Paid on: {new Date(rec.paymentDate).toLocaleDateString()}</p>}

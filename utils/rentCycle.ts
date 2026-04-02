@@ -39,23 +39,42 @@ export const createFirstRentRecord = async (
   unitIds?: string[]
 ) => {
   const now = new Date();
-  const rentStartDate = now.toISOString();
+  const currentDueDate = now.toISOString();
+  const currentMonth = getMonthLabel(currentDueDate);
+
+  // 1. Create paid record for the current initial month
+  await addDoc(collection(db, 'rentRecords'), {
+    tenantId,
+    propertyId,
+    unitId: unitIds?.[0] || '',
+    month: currentMonth,
+    rentAmount,
+    dueDate: currentDueDate,
+    status: 'paid',
+    paymentDate: now.toISOString(),
+    lateFee: 0,
+    lateFeePerDay: LATE_FEE_PER_DAY,
+    rentStartDate: now.toISOString(),
+    createdAt: now.toISOString()
+  });
+
+  // 2. Auto-generate the pending record for the NEXT month
   const nextDue = new Date(now);
   nextDue.setMonth(nextDue.getMonth() + 1);
   const nextDueDate = nextDue.toISOString();
-  const month = getMonthLabel(nextDueDate);
+  const nextMonth = getMonthLabel(nextDueDate);
 
   await addDoc(collection(db, 'rentRecords'), {
     tenantId,
     propertyId,
     unitId: unitIds?.[0] || '',
-    month,
+    month: nextMonth,
     rentAmount,
     dueDate: nextDueDate,
     status: 'pending',
     lateFee: 0,
     lateFeePerDay: LATE_FEE_PER_DAY,
-    rentStartDate,
+    rentStartDate: now.toISOString(),
     nextDueDate,
     reminderSent5: false,
     reminderSent2: false,
@@ -64,7 +83,7 @@ export const createFirstRentRecord = async (
     createdAt: new Date().toISOString()
   });
 
-  return { rentStartDate, nextDueDate, month };
+  return { rentStartDate: now.toISOString(), nextDueDate, month: nextMonth };
 };
 
 // ── Create next cycle rent record after a payment ───────────────────────────
@@ -146,7 +165,7 @@ export const processRentCycles = async (tenantId: string) => {
     // ── Overdue check: update status and late fee ──
     if (now > dueDate) {
       const daysOver = Math.floor((now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-      const lateFee = daysOver * (rec.lateFeePerDay || LATE_FEE_PER_DAY);
+      const lateFee = Math.round(rec.rentAmount * 0.02); // 2% flat penalty
       updates.status = 'overdue';
       updates.lateFee = lateFee;
 
@@ -155,7 +174,7 @@ export const processRentCycles = async (tenantId: string) => {
         await addDoc(collection(db, 'notifications'), {
           userId: tenantId,
           type: 'overdue',
-          message: `🚨 Your rent of ₹${rec.rentAmount} for ${rec.month} is OVERDUE by ${daysOver} day${daysOver > 1 ? 's' : ''}! Late fee of ₹${lateFee} has been applied (₹${rec.lateFeePerDay || LATE_FEE_PER_DAY}/day). Total due: ₹${rec.rentAmount + lateFee}. Pay immediately.`,
+          message: `🚨 Your rent of ₹${rec.rentAmount} for ${rec.month} is OVERDUE! A 2% flat penalty (₹${lateFee}) has been added. Total due: ₹${rec.rentAmount + lateFee}. Pay immediately.`,
           status: 'unread',
           createdAt: new Date().toISOString()
         });

@@ -1485,7 +1485,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                     const prop = allProperties.find(p => p.id === rec.propertyId);
                     const isOverdue = rec.status === 'overdue' || rec.status === 'late';
                     const daysOver = isOverdue ? getDaysOverdue(rec.dueDate) : 0;
-                    const currentLateFee = isOverdue ? calculateLateFee(rec.dueDate, rec.lateFeePerDay || 100) : 0;
+                    const currentLateFee = isOverdue ? Math.round(rec.rentAmount * 0.02) : 0;
                     const totalDue = rec.rentAmount + currentLateFee;
 
                     return (
@@ -1514,7 +1514,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                             )}
                             {isOverdue && currentLateFee > 0 && (
                               <p className="text-sm text-red-700 font-semibold mt-2 bg-red-50 px-3 py-1.5 rounded-lg border border-red-200">
-                                ⚠️ Late Fee: ₹{currentLateFee.toLocaleString('en-IN')} (₹{rec.lateFeePerDay || 100}/day × {daysOver} days)
+                                ⚠️ Overdue + Fine added: ₹{currentLateFee.toLocaleString('en-IN')} (2% penalty)
                               </p>
                             )}
                             {rec.paymentDate && <p className="text-xs text-green-600 mt-1">Paid on: {new Date(rec.paymentDate).toLocaleDateString()}</p>}
