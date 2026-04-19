@@ -11,6 +11,26 @@ import Layout from './Layout';
 import Modal from './Modal';
 import PaymentModal from './PaymentModal';
 import { TRANSLATIONS, Language } from '../translations';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { MapContainer, TileLayer, Marker, useMapEvents } from 'react-leaflet';
+
+// Fix leaflet icon issue
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
+const LocationPicker = ({ position, setPosition }: { position: {lat: number, lng: number} | null, setPosition: (p: {lat: number, lng: number}) => void }) => {
+  useMapEvents({
+    click(e) {
+      setPosition({ lat: e.latlng.lat, lng: e.latlng.lng });
+    },
+  });
+  return position ? <Marker position={position}></Marker> : null;
+};
 
 interface OwnerPanelProps {
   user: User;
@@ -47,6 +67,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
     description: '',
     propertyType: PropertyType.FLAT,
     availabilityStatus: 'available',
+    coordinates: null as {lat: number, lng: number} | null,
     units: [{ unitId: `unit_${Date.now()}`, unitName: '', floor: '', type: '', roomSize: '', rentAmount: 0, securityDeposit: 0, status: 'vacant' }] as PropertyUnit[]
   });
   const [addingProperty, setAddingProperty] = useState(false);
@@ -471,6 +492,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         isVisibleToTenants: false,
         createdAt: new Date().toISOString(),
         images: imageUrls,
+        coordinates: newProperty.coordinates,
         units: newProperty.units.map(u => ({ ...u, rentAmount: Number(u.rentAmount) })),
         listingPaid: true,
         listingFee: 49,
@@ -500,6 +522,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
         description: '',
         propertyType: PropertyType.FLAT,
         availabilityStatus: 'available',
+        coordinates: null as {lat: number, lng: number} | null,
         units: [{ unitId: `unit_${Date.now()}`, unitName: '', roomSize: '', rentAmount: 0, status: 'vacant' }] as PropertyUnit[]
       });
       alert('Payment successful! Your property has been submitted for approval.');
@@ -1558,6 +1581,43 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <input required value={newProperty.location} onChange={e => setNewProperty({ ...newProperty, location: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="e.g. Sector 14, Gurgaon" />
             </div>
             <div>
+              <label className="block text-sm font-medium text-[#2D3436] mb-1">Pin on Map (Required)</label>
+              <div className="flex flex-col gap-2">
+                <Button type="button" variant="outline" className="!py-2 w-fit bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100" onClick={() => {
+                  if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition((position) => {
+                      setNewProperty(prev => ({
+                        ...prev,
+                        coordinates: { lat: position.coords.latitude, lng: position.coords.longitude }
+                      }));
+                    }, (error) => {
+                      alert("Unable to retrieve your location. Please check browser permissions.");
+                    });
+                  } else {
+                    alert("Geolocation is not supported by your browser.");
+                  }
+                }}>
+                  <span className="flex items-center gap-2">📍 Use Current Location</span>
+                </Button>
+                <div className="h-[200px] w-full rounded-xl overflow-hidden border border-[#EAEAEA] z-0">
+                  <MapContainer center={newProperty.coordinates || {lat: 28.7041, lng: 77.1025}} zoom={newProperty.coordinates ? 15 : 10} style={{ height: '100%', width: '100%' }}>
+                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                    <LocationPicker 
+                      position={newProperty.coordinates} 
+                      setPosition={(pos) => setNewProperty(prev => ({ ...prev, coordinates: pos }))} 
+                    />
+                  </MapContainer>
+                </div>
+                {!newProperty.coordinates && <p className="text-xs text-red-500 font-bold">Please click on the map to set property location or use your current location.</p>}
+                {newProperty.coordinates && (
+                  <div className="flex gap-4">
+                    <p className="text-xs text-green-600 font-bold">Latitude: {newProperty.coordinates.lat.toFixed(6)}</p>
+                    <p className="text-xs text-green-600 font-bold">Longitude: {newProperty.coordinates.lng.toFixed(6)}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Description</label>
               <textarea required rows={3} value={newProperty.description} onChange={e => setNewProperty({ ...newProperty, description: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="Beautiful flat with park view..."></textarea>
             </div>
@@ -1649,7 +1709,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
             </div>
             <div className="flex gap-3 mt-6">
               <Button type="button" variant="outline" onClick={() => setIsPropertyModalOpen(false)} fullWidth>Cancel</Button>
-              <Button type="submit" disabled={addingProperty} fullWidth>{addingProperty ? 'Saving...' : 'Save Property'}</Button>
+              <Button type="submit" disabled={addingProperty || !newProperty.coordinates} fullWidth>{addingProperty ? 'Saving...' : 'Save Property'}</Button>
             </div>
           </form>
         </Modal>

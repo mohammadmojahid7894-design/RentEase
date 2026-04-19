@@ -13,7 +13,29 @@ import PaymentModal from './PaymentModal';
 import PaymentSuccess from './PaymentSuccess';
 import { TRANSLATIONS, Language } from '../translations';
 import { useAuth } from '../contexts/AuthContext';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
 
+// Fix leaflet icon issue
+delete (L.Icon.Default.prototype as any)._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
+const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = 
+    Math.sin(dLat/2) * Math.sin(dLat/2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+};
 interface TenantPanelProps {
   user: User;
   lang: Language;
@@ -44,6 +66,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const [maxPriceInData, setMaxPriceInData] = useState(100000);
   const [geoLoading, setGeoLoading] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
+  const [isMapView, setIsMapView] = useState(false);
+  const [nearMeRadius, setNearMeRadius] = useState<number>(0);
+  const [myLocationObj, setMyLocationObj] = useState<{lat: number, lng: number} | null>(null);
 
   // Application Form States
   const [applyIdProofUrl, setApplyIdProofUrl] = useState<string>('');
@@ -681,9 +706,18 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       const minUnitRent = Math.min(...unitRents);
       if (minUnitRent > priceRange[1] || Math.max(...unitRents) < priceRange[0]) return false;
 
+      // Near Me Filter
+      if (nearMeRadius > 0 && myLocationObj && p.coordinates) {
+        const dist = calculateDistance(myLocationObj.lat, myLocationObj.lng, p.coordinates.lat, p.coordinates.lng);
+        if (dist > nearMeRadius) return false;
+      } else if (nearMeRadius > 0 && myLocationObj && !p.coordinates) {
+        // Exclude properties without coordinates if near me filter is active
+        return false;
+      }
+
       return true;
     });
-  }, [propertiesWithUnits, searchQuery, selectedCity, priceRange]);
+  }, [propertiesWithUnits, searchQuery, selectedCity, priceRange, nearMeRadius, myLocationObj]);
 
   // ── Geolocation handler ────────────────────────────────────────────────
   const handleUseMyLocation = () => {
@@ -984,6 +1018,36 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                         />
                       </div>
                     </div>
+
+                    {/* Near Me Radius */}
+                    <div>
+                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 block flex justify-between">
+                        <span>Near Me Radius</span>
+                        <span className="text-[#4B5EAA] font-bold">{nearMeRadius > 0 ? `${nearMeRadius} km` : 'Off'}</span>
+                      </label>
+                      <div className="flex flex-col gap-1">
+                        <input
+                          type="range"
+                          min={0}
+                          max={50}
+                          step={1}
+                          value={nearMeRadius}
+                          onChange={e => {
+                            const val = Number(e.target.value);
+                            setNearMeRadius(val);
+                            if (val > 0 && !myLocationObj) {
+                              if (navigator.geolocation) {
+                                navigator.geolocation.getCurrentPosition(pos => {
+                                  setMyLocationObj({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+                                }, () => alert("Location required for Near Me search"));
+                              }
+                            }
+                          }}
+                          className="w-full accent-[#4B5EAA] h-2"
+                        />
+                        <span className="text-[10px] text-gray-400">Search around your current location</span>
+                      </div>
+                    </div>
                   </div>
 
                   {/* Active Filters & Clear */}
@@ -1008,6 +1072,12 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                             <button onClick={() => setPriceRange([0, maxPriceInData])} className="ml-1 hover:text-red-500">×</button>
                           </span>
                         )}
+                        {nearMeRadius > 0 && (
+                           <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#EEF2FF] text-[#4B5EAA] rounded-full text-xs font-semibold border border-[#C7D2FE]">
+                             Within {nearMeRadius} km
+                             <button onClick={() => setNearMeRadius(0)} className="ml-1 hover:text-red-500">×</button>
+                           </span>
+                        )}
                       </div>
                       <button onClick={clearFilters} className="text-xs text-red-500 font-semibold hover:underline">Clear All</button>
                     </div>
@@ -1021,9 +1091,23 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
               <p className="text-sm text-gray-500">
                 Showing <strong className="text-gray-800">{filteredProperties.length}</strong> of {propertiesWithUnits.length} properties
               </p>
+              <div className="flex bg-gray-100 rounded-lg p-1 border border-gray-200 shadow-inner">
+                <button 
+                  onClick={() => setIsMapView(false)} 
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${!isMapView ? 'bg-white text-[#4B5EAA] shadow' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  List View
+                </button>
+                <button 
+                  onClick={() => setIsMapView(true)} 
+                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${isMapView ? 'bg-[#4B5EAA] text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}
+                >
+                  Map View
+                </button>
+              </div>
             </div>
 
-            {/* ── Property Grid ─────────────────────────────────────── */}
+            {/* ── Property Grid or Map View ────────────────────────────── */}
             {filteredProperties.length === 0 ? (
               <div className="text-center p-12 bg-white rounded-2xl border border-dashed border-[#EAEAEA]">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-12 h-12 mx-auto text-gray-300 mb-3">
@@ -1034,6 +1118,31 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                 <button onClick={clearFilters} className="mt-4 px-4 py-2 bg-[#4B5EAA] text-white rounded-xl text-sm font-semibold hover:bg-[#3D4D8C] transition-colors">
                   Clear All Filters
                 </button>
+              </div>
+            ) : isMapView ? (
+              <div className="w-full h-[600px] border border-[#EAEAEA] rounded-2xl overflow-hidden shadow-sm relative z-0">
+                <MapContainer center={myLocationObj || {lat: 28.7041, lng: 77.1025}} zoom={11} style={{ height: '100%', width: '100%' }}>
+                  <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+                  {myLocationObj && (
+                    <Marker position={myLocationObj}>
+                      <Popup>
+                        <strong>You are here</strong>
+                      </Popup>
+                    </Marker>
+                  )}
+                  {filteredProperties.filter(p => p.coordinates).map(prop => (
+                    <Marker key={prop.id} position={prop.coordinates!}>
+                      <Popup>
+                        <div className="w-[200px]">
+                          {prop.images && prop.images[0] && <img src={prop.images[0]} className="w-full h-24 object-cover rounded-md mb-2" />}
+                          <h4 className="font-bold text-sm tracking-tight">{prop.propertyTitle}</h4>
+                          <p className="text-xs text-gray-500 mb-2 truncate">{prop.location}</p>
+                          <Button className="!py-1 !text-xs w-full" onClick={() => handleApplyClick(prop)}>View Details</Button>
+                        </div>
+                      </Popup>
+                    </Marker>
+                  ))}
+                </MapContainer>
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1064,6 +1173,11 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="m9.69 18.933.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 0 0 .281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 1 0 3 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 0 0 2.273 1.765 11.842 11.842 0 0 0 .976.536l.034.017Zm.31-10.433a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z" clipRule="evenodd" /></svg>
                               {prop.location}
                             </p>
+                            {prop.coordinates && myLocationObj && (
+                              <p className="text-xs text-[#4B5EAA] font-bold flex items-center gap-1 mt-1 bg-blue-50 px-2 py-0.5 rounded-full w-fit">
+                                📍 {calculateDistance(myLocationObj.lat, myLocationObj.lng, prop.coordinates.lat, prop.coordinates.lng).toFixed(1)} km away
+                              </p>
+                            )}
                           </div>
                           {owner && (
                             <span className="bg-purple-50 text-purple-700 text-xs font-bold px-2 py-1 rounded flex items-center gap-1">
