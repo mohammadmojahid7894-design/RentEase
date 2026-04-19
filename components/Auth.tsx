@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { db } from '../firebase';
-import { collection, query, where, getDocs, addDoc, updateDoc } from 'firebase/firestore';
+import { db, auth } from '../firebase';
+import { collection, query, where, getDocs, addDoc, updateDoc, setDoc, doc, getDoc } from 'firebase/firestore';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { User, UserRole } from '../types';
 import { Icons } from '../constants';
 
@@ -91,44 +92,39 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
         setLoading(true);
         setError('');
 
-        if (!password) {
-            setError('Password is required.');
+        if (!identifier || !password) {
+            setError('Email and Password are required.');
             setLoading(false);
             return;
         }
 
         try {
-            const usersRef = collection(db, 'users');
+            const userCredential = await signInWithEmailAndPassword(auth, identifier, password);
+            console.log("Login success:", userCredential.user);
+
+            // Fetch user data from firestore
+            const docRef = doc(db, 'users', userCredential.user.uid);
+            const docSnap = await getDoc(docRef);
+            
             let foundUser: any = null;
-
-            // Search by systemId (RE-OWN-XXXX / RE-TEN-XXXX)
-            const q1 = query(usersRef, where('systemId', '==', identifier.toUpperCase()));
-            const snap1 = await getDocs(q1);
-            if (!snap1.empty) foundUser = snap1.docs[0].data();
-
-            // Fallback: search by phone
-            if (!foundUser) {
-                const q2 = query(usersRef, where('phone', '==', identifier));
-                const snap2 = await getDocs(q2);
-                if (!snap2.empty) foundUser = snap2.docs[0].data();
-            }
-
-            // Fallback: search by legacy userId
-            if (!foundUser) {
-                const q3 = query(usersRef, where('userId', '==', identifier));
-                const snap3 = await getDocs(q3);
-                if (!snap3.empty) foundUser = snap3.docs[0].data();
+            if (docSnap.exists()) {
+                foundUser = docSnap.data();
+            } else {
+                // For backward compatibility (old accounts without UID document), query by email or systemId
+                const usersRef = collection(db, 'users');
+                const q1 = query(usersRef, where('email', '==', identifier));
+                const snap1 = await getDocs(q1);
+                if (!snap1.empty) {
+                    foundUser = snap1.docs[0].data();
+                } else {
+                    const q2 = query(usersRef, where('systemId', '==', identifier.toUpperCase()));
+                    const snap2 = await getDocs(q2);
+                    if (!snap2.empty) foundUser = snap2.docs[0].data();
+                }
             }
 
             if (!foundUser) {
-                setError('No account found with this System ID, phone number, or User ID.');
-                setLoading(false);
-                return;
-            }
-
-            // Verify password
-            if (foundUser.password && foundUser.password !== password) {
-                setError('Incorrect password. Please try again.');
+                setError('No user profile found for this account.');
                 setLoading(false);
                 return;
             }
@@ -146,7 +142,7 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
             }
 
             const userObj: User = {
-                id: foundUser.userId,
+                id: foundUser.userId || userCredential.user.uid,
                 systemId: foundUser.systemId,
                 name: foundUser.name,
                 phone: foundUser.phone,
@@ -160,8 +156,8 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
 
             onSuccess(userObj);
         } catch (err: any) {
-            console.error('Login Error:', err);
-            setError('An error occurred during login. Please try again.');
+            console.error('Login Error:', err.message);
+            setError(err.message);
         } finally {
             setLoading(false);
         }
@@ -173,13 +169,13 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
         setLoading(true);
         setError('');
 
-        if (!name.trim() || !phone.trim()) {
-            setError('Name and Phone Number are required.');
+        if (!name.trim() || !phone.trim() || !email.trim()) {
+            setError('Name, Phone Number, and Email are required.');
             setLoading(false);
             return;
         }
-        if (!regPassword || regPassword.length < 4) {
-            setError('Password must be at least 4 characters.');
+        if (!regPassword || regPassword.length < 6) {
+            setError('Password must be at least 6 characters.');
             setLoading(false);
             return;
         }
@@ -190,35 +186,26 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
         }
 
         try {
-            const usersRef = collection(db, 'users');
-
-            // Check if phone already registered
-            const q = query(usersRef, where('phone', '==', phone));
-            const snap = await getDocs(q);
-            if (!snap.empty) {
-                setError('An account with this phone number already exists.');
-                setLoading(false);
-                return;
-            }
+            const userCredential = await createUserWithEmailAndPassword(auth, email, regPassword);
+            console.log("User created:", userCredential.user);
 
             const systemId = await createUniqueSystemId(role);
-            const userId = `U-${Math.random().toString(36).substring(2, 10).toUpperCase()}`;
+            const userId = userCredential.user.uid;
 
             const userData = {
                 name,
                 phone,
-                email: email || null,
+                email,
                 role: role === UserRole.OWNER ? 'owner' : role === UserRole.ADMIN ? 'admin' : 'tenant',
                 userId,
                 systemId,
-                password: regPassword,
                 createdAt: new Date().toISOString(),
                 smsSent: false,
                 emailSent: false,
                 notificationSentAt: null
             };
 
-            const docRef = await addDoc(usersRef, userData);
+            await setDoc(doc(db, 'users', userId), userData);
 
             // Trigger Welcome API for SMS & Email
             let smsSuccess = false;
@@ -246,7 +233,7 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
 
             // Update user document with notification status
             try {
-                await updateDoc(docRef, {
+                await updateDoc(doc(db, 'users', userId), {
                     smsSent: smsSuccess,
                     emailSent: emailSuccess,
                     notificationSentAt: new Date().toISOString()
@@ -258,7 +245,7 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
             alert(
                 `✅ Account created successfully!\n\n` +
                 `Your System ID: ${systemId}\n\n` +
-                `Use this ID + your password to login.\nPlease save it somewhere safe.\n\n` +
+                `Use your Email + Password to login.\nPlease save it somewhere safe.\n\n` +
                 `A confirmation SMS and email have been initiated.`
             );
 
@@ -268,13 +255,13 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                 name: userData.name,
                 phone: userData.phone,
                 role: userData.role === 'owner' ? UserRole.OWNER : userData.role === 'admin' ? UserRole.ADMIN : UserRole.TENANT,
-                email: userData.email || undefined
+                email: userData.email
             };
 
             onSuccess(userObj);
         } catch (err: any) {
-            console.error('Registration Error:', err);
-            setError('An error occurred during account creation. Please try again.');
+            console.error('Signup Error:', err.message);
+            setError(err.message);
         } finally {
             setLoading(false);
         }
@@ -304,9 +291,9 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                         </h2>
                         <p className="text-[#8E9491] mt-2">
                             {role === UserRole.ADMIN
-                                ? 'Enter your Admin ID and password'
+                                ? 'Enter your Admin Email and password'
                                 : (mode === 'login'
-                                    ? 'Enter your System ID or Phone + Password'
+                                    ? 'Enter your Email Address & Password'
                                     : 'Join us to manage your properties easily')}
                         </p>
                     </div>
@@ -336,11 +323,11 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                     {mode === 'login' ? (
                         <form onSubmit={handleLogin} className="space-y-5">
                             <div>
-                                <label className="block text-sm font-bold text-[#2D3436] mb-2">System ID or Phone Number</label>
+                                <label className="block text-sm font-bold text-[#2D3436] mb-2">Email Address</label>
                                 <input
-                                    type="text"
+                                    type="email"
                                     className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9] font-mono"
-                                    placeholder={role === UserRole.ADMIN ? 'admin or RE-ADM-XXXX' : (role === UserRole.OWNER ? 'RE-OWN-XXXX or Phone' : 'RE-TEN-XXXX or Phone')}
+                                    placeholder="Enter your email"
                                     value={identifier}
                                     onChange={(e) => setIdentifier(e.target.value)}
                                     required
@@ -397,13 +384,14 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                                 />
                             </div>
                             <div>
-                                <label className="block text-sm font-bold text-[#2D3436] mb-2">Email (Optional)</label>
+                                <label className="block text-sm font-bold text-[#2D3436] mb-2">Email</label>
                                 <input
                                     type="email"
                                     className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9]"
                                     placeholder="john@example.com"
                                     value={email}
                                     onChange={(e) => setEmail(e.target.value)}
+                                    required
                                 />
                             </div>
                             <div>
@@ -412,7 +400,7 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                                     <input
                                         type={showRegPassword ? 'text' : 'password'}
                                         className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9] pr-12"
-                                        placeholder="Min. 4 characters"
+                                        placeholder="Min. 6 characters"
                                         value={regPassword}
                                         onChange={(e) => setRegPassword(e.target.value)}
                                         required
