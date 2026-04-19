@@ -29,15 +29,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Initialize persistence for fallback auth (satisfies prompt request)
   useEffect(() => {
+    console.log("Loading start");
+    setLoading(true);
+
+    const fallbackTimeout = setTimeout(() => {
+      setLoading(false);
+      console.log("Loading end (timeout failsafe)");
+    }, 5000);
+
     setPersistence(auth, browserLocalPersistence).catch(console.error);
-    
-    // Also listen to onAuthStateChanged to satisfy user snippet, though we rely on our custom systemId login
+
     const unsub = onAuthStateChanged(auth, (fbUser) => {
-      if (fbUser) {
-        // If we integrated real firebase auth, we'd sync here
+      try {
+        if (fbUser) {
+           // We continue relying on systemId, but sync is possible here
+        }
+        console.log("Data fetched");
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+        clearTimeout(fallbackTimeout);
+        console.log("Loading end");
       }
     });
-    return () => unsub();
+
+    return () => {
+      unsub();
+      clearTimeout(fallbackTimeout);
+    };
   }, []);
 
   // Restore our custom system ID session
@@ -50,14 +70,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch {
       localStorage.removeItem(SESSION_KEY);
     }
-    setLoading(false);
   }, []);
 
   const login = async (user: User) => {
     setLoading(true);
-    setCurrentUser(user);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    setLoading(false);
+    try {
+      setCurrentUser(user);
+      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const logout = () => {
@@ -75,7 +99,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {children}
     </AuthContext.Provider>
   );
 };
