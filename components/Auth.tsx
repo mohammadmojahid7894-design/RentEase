@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { db, auth } from '../firebase';
+import { db } from '../firebase';
 import { collection, query, where, getDocs, addDoc, updateDoc, setDoc, doc, getDoc } from 'firebase/firestore';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { User, UserRole } from '../types';
 import { Icons } from '../constants';
 
@@ -46,10 +45,11 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
 
+    const [loginPhone, setLoginPhone] = useState('');
+
     // Register fields
     const [name, setName] = useState('');
     const [phone, setPhone] = useState('');
-    const [email, setEmail] = useState('');
     const [regPassword, setRegPassword] = useState('');
     const [showRegPassword, setShowRegPassword] = useState(false);
     const [confirmPassword, setConfirmPassword] = useState('');
@@ -92,39 +92,44 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
         setLoading(true);
         setError('');
 
-        if (!identifier || !password) {
-            setError('Email and Password are required.');
+        if (!identifier || !loginPhone || !password) {
+            setError('User ID, Phone, and Password are required.');
             setLoading(false);
             return;
         }
 
         try {
-            const userCredential = await signInWithEmailAndPassword(auth, identifier, password);
-            console.log("Login success:", userCredential.user);
-
-            // Fetch user data from firestore
-            const docRef = doc(db, 'users', userCredential.user.uid);
-            const docSnap = await getDoc(docRef);
-            
+            const enteredUserId = identifier.toUpperCase();
+            const docRef = doc(db, 'users', enteredUserId);
+            let docSnap = await getDoc(docRef);
             let foundUser: any = null;
+
             if (docSnap.exists()) {
                 foundUser = docSnap.data();
             } else {
-                // For backward compatibility (old accounts without UID document), query by email or systemId
+                // Fallback for legacy items that might be structured differently
                 const usersRef = collection(db, 'users');
-                const q1 = query(usersRef, where('email', '==', identifier));
+                const q1 = query(usersRef, where('systemId', '==', enteredUserId));
                 const snap1 = await getDocs(q1);
                 if (!snap1.empty) {
                     foundUser = snap1.docs[0].data();
-                } else {
-                    const q2 = query(usersRef, where('systemId', '==', identifier.toUpperCase()));
-                    const snap2 = await getDocs(q2);
-                    if (!snap2.empty) foundUser = snap2.docs[0].data();
                 }
             }
 
             if (!foundUser) {
-                setError('No user profile found for this account.');
+                setError('User not found. Check your User ID.');
+                setLoading(false);
+                return;
+            }
+
+            if (foundUser.phone !== loginPhone) {
+                setError('Invalid phone number.');
+                setLoading(false);
+                return;
+            }
+
+            if (foundUser.password !== password) {
+                setError('Wrong password.');
                 setLoading(false);
                 return;
             }
@@ -142,8 +147,8 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
             }
 
             const userObj: User = {
-                id: foundUser.userId || userCredential.user.uid,
-                systemId: foundUser.systemId,
+                id: foundUser.userId || enteredUserId,
+                systemId: foundUser.systemId || enteredUserId,
                 name: foundUser.name,
                 phone: foundUser.phone,
                 role: userRole,
@@ -157,7 +162,7 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
             onSuccess(userObj);
         } catch (err: any) {
             console.error('Login Error:', err.message);
-            setError(err.message);
+            setError('Login error: ' + err.message);
         } finally {
             setLoading(false);
         }
@@ -169,13 +174,18 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
         setLoading(true);
         setError('');
 
-        if (!name.trim() || !phone.trim() || !email.trim()) {
-            setError('Name, Phone Number, and Email are required.');
+        if (!name.trim() || !phone.trim()) {
+            setError('Name and Phone Number are required.');
             setLoading(false);
             return;
         }
-        if (!regPassword || regPassword.length < 6) {
-            setError('Password must be at least 6 characters.');
+        if (!regPassword || regPassword.length < 4) {
+            setError('Password must be at least 4 characters.');
+            setLoading(false);
+            return;
+        }
+        if (!confirmPassword) {
+            setError('Confirm Password is required.');
             setLoading(false);
             return;
         }
@@ -186,76 +196,33 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
         }
 
         try {
-            const userCredential = await createUserWithEmailAndPassword(auth, email, regPassword);
-            console.log("User created:", userCredential.user);
-
             const systemId = await createUniqueSystemId(role);
-            const userId = userCredential.user.uid;
+            const userId = systemId; // use systemId directly as doc ID
 
             const userData = {
                 name,
                 phone,
-                email,
                 role: role === UserRole.OWNER ? 'owner' : role === UserRole.ADMIN ? 'admin' : 'tenant',
                 userId,
                 systemId,
-                createdAt: new Date().toISOString(),
-                smsSent: false,
-                emailSent: false,
-                notificationSentAt: null
+                password: regPassword,
+                createdAt: new Date().toISOString()
             };
 
             await setDoc(doc(db, 'users', userId), userData);
 
-            // Trigger Welcome API for SMS & Email
-            let smsSuccess = false;
-            let emailSuccess = false;
-            try {
-                const apiRes = await fetch('/api/sendWelcome', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: userData.name,
-                        phone: userData.phone,
-                        email: userData.email,
-                        role: userData.role
-                    })
-                });
-                
-                if (apiRes.ok) {
-                    const notifyData = await apiRes.json();
-                    smsSuccess = notifyData.smsSent;
-                    emailSuccess = notifyData.emailSent;
-                }
-            } catch (notifyErr) {
-                console.error("Failed to trigger welcome notifications:", notifyErr);
-            }
-
-            // Update user document with notification status
-            try {
-                await updateDoc(doc(db, 'users', userId), {
-                    smsSent: smsSuccess,
-                    emailSent: emailSuccess,
-                    notificationSentAt: new Date().toISOString()
-                });
-            } catch (updateErr) {
-                console.error("Failed to update notification status in DB:", updateErr);
-            }
-
             alert(
                 `✅ Account created successfully!\n\n` +
-                `Your System ID: ${systemId}\n\n` +
-                `Use your Email + Password to login.\nPlease save it somewhere safe.\n\n` +
-                `A confirmation SMS and email have been initiated.`
+                `Your User ID: ${systemId}\n\n` +
+                `Use this ID + your Phone + Password to login.\nPlease save it somewhere safe.`
             );
 
             const userObj: User = {
                 id: userId,
-                systemId,
+                systemId: systemId,
                 name: userData.name,
                 phone: userData.phone,
-                role: userData.role === 'owner' ? UserRole.OWNER : userData.role === 'admin' ? UserRole.ADMIN : UserRole.TENANT,
-                email: userData.email
+                role: userData.role === 'owner' ? UserRole.OWNER : userData.role === 'admin' ? UserRole.ADMIN : UserRole.TENANT
             };
 
             onSuccess(userObj);
@@ -291,9 +258,9 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                         </h2>
                         <p className="text-[#8E9491] mt-2">
                             {role === UserRole.ADMIN
-                                ? 'Enter your Admin Email and password'
+                                ? 'Enter your Admin ID, Phone, and password'
                                 : (mode === 'login'
-                                    ? 'Enter your Email Address & Password'
+                                    ? 'Enter your User ID, Phone & Password'
                                     : 'Join us to manage your properties easily')}
                         </p>
                     </div>
@@ -323,13 +290,24 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                     {mode === 'login' ? (
                         <form onSubmit={handleLogin} className="space-y-5">
                             <div>
-                                <label className="block text-sm font-bold text-[#2D3436] mb-2">Email Address</label>
+                                <label className="block text-sm font-bold text-[#2D3436] mb-2">User ID</label>
                                 <input
-                                    type="email"
+                                    type="text"
                                     className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9] font-mono"
-                                    placeholder="Enter your email"
+                                    placeholder={role === UserRole.OWNER ? 'RE-OWN-XXXX' : 'RE-TEN-XXXX'}
                                     value={identifier}
                                     onChange={(e) => setIdentifier(e.target.value)}
+                                    required
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-bold text-[#2D3436] mb-2">Phone Number</label>
+                                <input
+                                    type="tel"
+                                    className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9]"
+                                    placeholder="Enter your registered phone"
+                                    value={loginPhone}
+                                    onChange={(e) => setLoginPhone(e.target.value)}
                                     required
                                 />
                             </div>
@@ -383,24 +361,14 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                                     required
                                 />
                             </div>
-                            <div>
-                                <label className="block text-sm font-bold text-[#2D3436] mb-2">Email</label>
-                                <input
-                                    type="email"
-                                    className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9]"
-                                    placeholder="john@example.com"
-                                    value={email}
-                                    onChange={(e) => setEmail(e.target.value)}
-                                    required
-                                />
-                            </div>
+
                             <div>
                                 <label className="block text-sm font-bold text-[#2D3436] mb-2">Password</label>
                                 <div className="relative">
                                     <input
                                         type={showRegPassword ? 'text' : 'password'}
                                         className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9] pr-12"
-                                        placeholder="Min. 6 characters"
+                                        placeholder="Min. 4 characters"
                                         value={regPassword}
                                         onChange={(e) => setRegPassword(e.target.value)}
                                         required

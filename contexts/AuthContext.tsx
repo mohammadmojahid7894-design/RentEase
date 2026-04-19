@@ -1,7 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, UserRole } from '../types';
-import { auth } from '../firebase';
-import { onAuthStateChanged, setPersistence, browserLocalPersistence } from 'firebase/auth';
 
 interface AuthContextType {
   currentUser: User | null;
@@ -27,35 +25,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Initialize persistence for fallback auth (satisfies prompt request)
   useEffect(() => {
     console.log("Loading start");
     setLoading(true);
 
     const fallbackTimeout = setTimeout(() => {
       setLoading(false);
-      console.log("Loading end (timeout failsafe)");
-    }, 5000);
-
-    setPersistence(auth, browserLocalPersistence).catch(console.error);
-
-    const unsub = onAuthStateChanged(auth, (fbUser) => {
-      try {
-        if (fbUser) {
-           // We continue relying on systemId, but sync is possible here
-        }
-        console.log("Data fetched");
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
-        clearTimeout(fallbackTimeout);
-        console.log("Loading end");
-      }
-    });
+      console.log("Loading end (custom auth)");
+    }, 500); // reduced timeout because no firebase checking
 
     return () => {
-      unsub();
       clearTimeout(fallbackTimeout);
     };
   }, []);
