@@ -41,11 +41,9 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
     const [role, setRole] = useState<UserRole>(initialRole);
 
     // Login fields
-    const [identifier, setIdentifier] = useState(''); // systemId, phone, or userId
+    const [input, setInput] = useState('');
     const [password, setPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
-
-    const [loginPhone, setLoginPhone] = useState('');
 
     // Register fields
     const [name, setName] = useState('');
@@ -91,44 +89,47 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
         e.preventDefault();
         setLoading(true);
         setError('');
+        console.log("Login triggered");
 
-        if (!identifier || !loginPhone || !password) {
-            setError('User ID, Phone, and Password are required.');
+        if (!input || !password) {
+            setError('User ID/Phone and Password are required.');
             setLoading(false);
             return;
         }
 
         try {
-            const enteredUserId = identifier.toUpperCase();
-            const docRef = doc(db, 'users', enteredUserId);
-            let docSnap = await getDoc(docRef);
+            const enteredInput = input.trim();
+            const usersRef = collection(db, "users");
+            const q = query(usersRef, where("userId", "==", enteredInput));
+            const q2 = query(usersRef, where("phone", "==", enteredInput));
+
             let foundUser: any = null;
 
-            if (docSnap.exists()) {
-                foundUser = docSnap.data();
+            let snapshot = await getDocs(q);
+            if (!snapshot.empty) {
+                foundUser = snapshot.docs[0].data();
             } else {
-                // Fallback for legacy items that might be structured differently
-                const usersRef = collection(db, 'users');
-                const q1 = query(usersRef, where('systemId', '==', enteredUserId));
-                const snap1 = await getDocs(q1);
-                if (!snap1.empty) {
-                    foundUser = snap1.docs[0].data();
+                snapshot = await getDocs(q2);
+                if (!snapshot.empty) {
+                    foundUser = snapshot.docs[0].data();
+                } else {
+                    const qSystemId = query(usersRef, where("systemId", "==", enteredInput));
+                    snapshot = await getDocs(qSystemId);
+                    if (!snapshot.empty) {
+                        foundUser = snapshot.docs[0].data();
+                    }
                 }
             }
 
             if (!foundUser) {
-                setError('User not found. Check your User ID.');
-                setLoading(false);
-                return;
-            }
-
-            if (foundUser.phone !== loginPhone) {
-                setError('Invalid phone number.');
+                alert("User not found");
+                setError('User not found. Check your User ID or Phone.');
                 setLoading(false);
                 return;
             }
 
             if (foundUser.password !== password) {
+                alert("Wrong password");
                 setError('Wrong password.');
                 setLoading(false);
                 return;
@@ -147,8 +148,8 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
             }
 
             const userObj: User = {
-                id: foundUser.userId || enteredUserId,
-                systemId: foundUser.systemId || enteredUserId,
+                id: foundUser.userId || foundUser.systemId,
+                systemId: foundUser.systemId || foundUser.userId,
                 name: foundUser.name,
                 phone: foundUser.phone,
                 role: userRole,
@@ -161,7 +162,8 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
 
             onSuccess(userObj);
         } catch (err: any) {
-            console.error('Login Error:', err.message);
+            console.error(err);
+            alert(err.message);
             setError('Login error: ' + err.message);
         } finally {
             setLoading(false);
@@ -226,9 +228,10 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
             };
 
             onSuccess(userObj);
-        } catch (err: any) {
-            console.error('Signup Error:', err.message);
-            setError(err.message);
+        } catch (error: any) {
+            console.error(error);
+            alert(error.message);
+            setError(error.message);
         } finally {
             setLoading(false);
         }
@@ -290,24 +293,13 @@ const Auth: React.FC<AuthProps> = ({ initialMode = 'login', initialRole = UserRo
                     {mode === 'login' ? (
                         <form onSubmit={handleLogin} className="space-y-5">
                             <div>
-                                <label className="block text-sm font-bold text-[#2D3436] mb-2">User ID</label>
+                                <label className="block text-sm font-bold text-[#2D3436] mb-2">User ID or Phone</label>
                                 <input
                                     type="text"
                                     className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9] font-mono"
-                                    placeholder={role === UserRole.OWNER ? 'RE-OWN-XXXX' : 'RE-TEN-XXXX'}
-                                    value={identifier}
-                                    onChange={(e) => setIdentifier(e.target.value)}
-                                    required
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-bold text-[#2D3436] mb-2">Phone Number</label>
-                                <input
-                                    type="tel"
-                                    className="w-full border-2 border-[#EAEAEA] p-4 rounded-xl focus:outline-none focus:border-[#4B5EAA] transition-colors bg-[#FDFCF9]"
-                                    placeholder="Enter your registered phone"
-                                    value={loginPhone}
-                                    onChange={(e) => setLoginPhone(e.target.value)}
+                                    placeholder="Enter your User ID or Phone"
+                                    value={input}
+                                    onChange={(e) => setInput(e.target.value)}
                                     required
                                 />
                             </div>

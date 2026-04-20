@@ -26,13 +26,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log("App loaded");
     console.log("Loading start");
     setLoading(true);
 
     const fallbackTimeout = setTimeout(() => {
       setLoading(false);
       console.log("Loading end (custom auth)");
-    }, 500); // reduced timeout because no firebase checking
+    }, 4000); // 4000ms fallback fix to avoid infinite loading
 
     return () => {
       clearTimeout(fallbackTimeout);
