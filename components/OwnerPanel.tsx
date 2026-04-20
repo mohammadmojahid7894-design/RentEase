@@ -73,6 +73,11 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   const [addingProperty, setAddingProperty] = useState(false);
   const [newPropertyImages, setNewPropertyImages] = useState<File[]>([]);
 
+  // Map Feature States
+  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchAddress, setSearchAddress] = useState('');
+
   // Manual Tenant State
   const [isManualTenantModalOpen, setIsManualTenantModalOpen] = useState(false);
   const [manualTenantForm, setManualTenantForm] = useState({
@@ -140,6 +145,20 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
   const [isListingFeeModalOpen, setIsListingFeeModalOpen] = useState(false);
 
   const t = TRANSLATIONS[lang];
+
+  // Map Reverse Geocoding address fetch
+  useEffect(() => {
+    if (newProperty.coordinates) {
+      fetch(`https://nominatim.openstreetmap.org/reverse?lat=${newProperty.coordinates.lat}&lon=${newProperty.coordinates.lng}&format=json`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && data.display_name) {
+            setSearchAddress(data.display_name);
+          }
+        })
+        .catch(console.error);
+    }
+  }, [newProperty.coordinates]);
 
   // Fetch Owner's Properties
   useEffect(() => {
@@ -1581,17 +1600,40 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
               <input required value={newProperty.location} onChange={e => setNewProperty({ ...newProperty, location: e.target.value })} className="w-full p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="e.g. Sector 14, Gurgaon" />
             </div>
             <div>
+              <label className="block text-sm font-medium text-[#2D3436] mb-1">Search location</label>
+              <div className="flex gap-2 mb-2">
+                <input type="text" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    document.getElementById('search-location-btn')?.click();
+                  }
+                }} className="flex-1 p-3 rounded-xl border border-[#EAEAEA] bg-[#F9F8F6]" placeholder="e.g. Connaught Place, New Delhi" />
+                <Button id="search-location-btn" type="button" onClick={async () => {
+                   if(!searchQuery) return;
+                   try {
+                     const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${searchQuery}&format=json`);
+                     const data = await res.json();
+                     if (data && data.length > 0) {
+                        const lat = parseFloat(data[0].lat);
+                        const lon = parseFloat(data[0].lon);
+                        setNewProperty(prev => ({...prev, coordinates: {lat, lng: lon}}));
+                        if(mapInstance) mapInstance.setView([lat, lon], 13);
+                     } else { alert("Location not found"); }
+                   } catch(err) {} 
+                }}>Search</Button>
+              </div>
+
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Pin on Map (Required)</label>
               <div className="flex flex-col gap-2">
                 <Button type="button" variant="outline" className="!py-2 w-fit bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100" onClick={() => {
                   if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition((position) => {
-                      setNewProperty(prev => ({
-                        ...prev,
-                        coordinates: { lat: position.coords.latitude, lng: position.coords.longitude }
-                      }));
-                    }, (error) => {
-                      alert("Unable to retrieve your location. Please check browser permissions.");
+                    navigator.geolocation.getCurrentPosition((pos) => {
+                      const lat = pos.coords.latitude;
+                      const lng = pos.coords.longitude;
+                      setNewProperty(prev => ({ ...prev, coordinates: { lat, lng } }));
+                      if (mapInstance) mapInstance.setView([lat, lng], 15);
+                    }, (err) => {
+                      alert("Location access denied");
                     });
                   } else {
                     alert("Geolocation is not supported by your browser.");
@@ -1599,8 +1641,8 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                 }}>
                   <span className="flex items-center gap-2">📍 Use Current Location</span>
                 </Button>
-                <div className="h-[200px] w-full rounded-xl overflow-hidden border border-[#EAEAEA] z-0">
-                  <MapContainer center={newProperty.coordinates || {lat: 28.7041, lng: 77.1025}} zoom={newProperty.coordinates ? 15 : 10} style={{ height: '100%', width: '100%' }}>
+                <div className="h-[300px] w-full rounded-xl overflow-hidden border border-[#EAEAEA] z-0 relative">
+                  <MapContainer center={newProperty.coordinates || {lat: 28.7041, lng: 77.1025}} zoom={13} scrollWheelZoom={true} style={{ height: "300px", width: "100%" }} ref={setMapInstance}>
                     <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
                     <LocationPicker 
                       position={newProperty.coordinates} 
@@ -1610,9 +1652,12 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
                 </div>
                 {!newProperty.coordinates && <p className="text-xs text-red-500 font-bold">Please click on the map to set property location or use your current location.</p>}
                 {newProperty.coordinates && (
-                  <div className="flex gap-4">
-                    <p className="text-xs text-green-600 font-bold">Latitude: {newProperty.coordinates.lat.toFixed(6)}</p>
-                    <p className="text-xs text-green-600 font-bold">Longitude: {newProperty.coordinates.lng.toFixed(6)}</p>
+                  <div className="flex flex-col gap-1 p-3 bg-green-50 rounded border border-green-200">
+                    <div className="flex gap-4">
+                      <p className="text-xs text-green-700 font-bold">Latitude: {newProperty.coordinates.lat.toFixed(6)}</p>
+                      <p className="text-xs text-green-700 font-bold">Longitude: {newProperty.coordinates.lng.toFixed(6)}</p>
+                    </div>
+                    {searchAddress && <p className="text-xs text-gray-700"><strong>Address:</strong> {searchAddress}</p>}
                   </div>
                 )}
               </div>
