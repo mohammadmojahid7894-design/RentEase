@@ -9,15 +9,12 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@types/leaflet": "^1.9.21",
     "firebase": "^12.10.0",
-    "leaflet": "^1.9.4",
     "pptxgenjs": "^4.0.1",
     "puppeteer": "^24.40.0",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "react-leaflet": "^5.0.0"
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

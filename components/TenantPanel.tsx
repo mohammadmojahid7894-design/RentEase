@@ -13,29 +13,6 @@ import PaymentModal from './PaymentModal';
 import PaymentSuccess from './PaymentSuccess';
 import { TRANSLATIONS, Language } from '../translations';
 import { useAuth } from '../contexts/AuthContext';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents } from 'react-leaflet';
-
-// Fix leaflet icon issue
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
-
-const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
-  const R = 6371; // km
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-  return R * c;
-};
 interface TenantPanelProps {
   user: User;
   lang: Language;
@@ -46,14 +23,6 @@ interface PropertyWithUnits extends Property {
   availableUnits: PropertyUnit[];
 }
 
-const LocationPicker = ({ position, setPosition }: { position: [number, number] | null, setPosition: (p: [number, number]) => void }) => {
-  useMapEvents({
-    click(e) {
-      setPosition([e.latlng.lat, e.latlng.lng]);
-    },
-  });
-  return position ? <Marker position={position}></Marker> : null;
-};
 
 const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const { login } = useAuth();
@@ -73,12 +42,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
   const [selectedCity, setSelectedCity] = useState('');
   const [priceRange, setPriceRange] = useState<[number, number]>([0, 100000]);
   const [maxPriceInData, setMaxPriceInData] = useState(100000);
-  const [loadingLocation, setLoadingLocation] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
-  const [isMapView, setIsMapView] = useState(false);
-  const [nearMeRadius, setNearMeRadius] = useState<number>(0);
-  const [position, setPosition] = useState<[number, number] | null>(null);
-  const [mapInstance, setMapInstance] = useState<L.Map | null>(null);
 
   // Application Form States
   const [applyIdProofUrl, setApplyIdProofUrl] = useState<string>('');
@@ -716,62 +680,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
       const minUnitRent = Math.min(...unitRents);
       if (minUnitRent > priceRange[1] || Math.max(...unitRents) < priceRange[0]) return false;
 
-      // Near Me Filter
-      if (nearMeRadius > 0 && position && p.coordinates) {
-        const dist = calculateDistance(position[0], position[1], p.coordinates.lat, p.coordinates.lng);
-        if (dist > nearMeRadius) return false;
-      } else if (nearMeRadius > 0 && position && !p.coordinates) {
-        // Exclude properties without coordinates if near me filter is active
-        return false;
-      }
-
       return true;
     });
-  }, [propertiesWithUnits, searchQuery, selectedCity, priceRange, nearMeRadius, position]);
-
-  // ── Geolocation handler ────────────────────────────────────────────────
-  const handleUseMyLocation = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.');
-      return;
-    }
-    setLoadingLocation(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = pos.coords.latitude;
-        const lng = pos.coords.longitude;
-        setPosition([lat, lng]);
-
-        if (mapInstance) {
-          mapInstance.setView([lat, lng], 15);
-        }
-        setLoadingLocation(false);
-      },
-      (err) => {
-        console.error(err);
-        setLoadingLocation(false);
-        alert("Location permission denied or unavailable");
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
-      }
-    );
-  };
-
-  useEffect(() => {
-    if (position) {
-      fetch(`https://nominatim.openstreetmap.org/reverse?lat=${position[0]}&lon=${position[1]}&format=json`)
-        .then(res => res.json())
-        .then(data => {
-          if (data && data.display_name) {
-            setSearchQuery(data.display_name);
-          }
-        })
-        .catch(console.error);
-    }
-  }, [position]);
+  }, [propertiesWithUnits, searchQuery, selectedCity, priceRange]);
 
   const clearFilters = () => {
     setSearchQuery('');
@@ -922,66 +833,18 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
             <div className="bg-white p-4 rounded-2xl border border-[#EAEAEA] shadow-sm space-y-4">
               <div className="flex flex-col md:flex-row gap-3">
                 {/* Search Input */}
-                <div className="relative flex-1 flex gap-2">
-                  <div className="relative flex-1">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
-                      <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
-                    </svg>
-                    <input
-                      type="text"
-                      placeholder="Search location or precise address..."
-                      value={searchQuery}
-                      onChange={e => setSearchQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          document.getElementById('tenant-map-search-btn')?.click();
-                        }
-                      }}
-                      className="w-full pl-10 pr-4 py-3 border border-[#DDDCDB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#4B5EAA] focus:border-transparent transition-all bg-[#FAFAFA]"
-                    />
-                  </div>
-                  <button
-                    id="tenant-map-search-btn"
-                    onClick={async () => {
-                       if(!searchQuery) return;
-                       try {
-                         const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${searchQuery}&format=json`);
-                         const data = await res.json();
-                         if (data && data.length > 0) {
-                            const lat = parseFloat(data[0].lat);
-                            const lon = parseFloat(data[0].lon);
-                            setPosition([lat, lon]);
-                            if(mapInstance) mapInstance.setView([lat, lon], 13);
-                         } else { alert("Location not found"); }
-                       } catch(err) {} 
-                    }}
-                    className="px-4 py-3 bg-[#EEF2FF] text-[#4B5EAA] border border-[#C7D2FE] rounded-xl font-bold whitespace-nowrap hover:bg-[#E0E7FF] transition-colors"
-                  >
-                    Locate
-                  </button>
+                <div className="relative flex-1">
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-5 h-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                    <path fillRule="evenodd" d="M9 3.5a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11ZM2 9a7 7 0 1 1 12.452 4.391l3.328 3.329a.75.75 0 1 1-1.06 1.06l-3.329-3.328A7 7 0 0 1 2 9Z" clipRule="evenodd" />
+                  </svg>
+                  <input
+                    type="text"
+                    placeholder="Search by location, city or property name..."
+                    value={searchQuery}
+                    onChange={e => setSearchQuery(e.target.value)}
+                    className="w-full pl-10 pr-4 py-3 border border-[#DDDCDB] rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#4B5EAA] focus:border-transparent transition-all bg-[#FAFAFA]"
+                  />
                 </div>
-
-                {/* Use My Location */}
-                <button
-                  onClick={handleUseMyLocation}
-                  disabled={loadingLocation}
-                  className="flex items-center gap-2 px-4 py-3 bg-gradient-to-r from-[#4B5EAA] to-[#3D4D8C] text-white rounded-xl text-sm font-semibold hover:opacity-90 transition-all disabled:opacity-60 whitespace-nowrap shadow-sm"
-                >
-                  {loadingLocation ? (
-                    <span className="flex items-center gap-2">
-                      <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-                      Detecting...
-                    </span>
-                  ) : (
-                    <>
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
-                        <path fillRule="evenodd" d="m9.69 18.933.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 0 0 .281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 1 0 3 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 0 0 2.273 1.765 11.842 11.842 0 0 0 .976.536l.034.017Zm.31-10.433a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z" clipRule="evenodd" />
-                      </svg>
-                      Use My Location
-                    </>
-                  )}
-                </button>
 
                 {/* Toggle Filters */}
                 <button
@@ -1062,35 +925,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                       </div>
                     </div>
 
-                    {/* Near Me Radius */}
-                    <div>
-                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1 block flex justify-between">
-                        <span>Near Me Radius</span>
-                        <span className="text-[#4B5EAA] font-bold">{nearMeRadius > 0 ? `${nearMeRadius} km` : 'Off'}</span>
-                      </label>
-                      <div className="flex flex-col gap-1">
-                        <input
-                          type="range"
-                          min={0}
-                          max={50}
-                          step={1}
-                          value={nearMeRadius}
-                          onChange={e => {
-                            const val = Number(e.target.value);
-                            setNearMeRadius(val);
-                            if (val > 0 && !position) {
-                              if (navigator.geolocation) {
-                                navigator.geolocation.getCurrentPosition(pos => {
-                                  setPosition([pos.coords.latitude, pos.coords.longitude]);
-                                }, () => alert("Location required for Near Me search"));
-                              }
-                            }
-                          }}
-                          className="w-full accent-[#4B5EAA] h-2"
-                        />
-                        <span className="text-[10px] text-gray-400">Search around your current location</span>
-                      </div>
-                    </div>
+
                   </div>
 
                   {/* Active Filters & Clear */}
@@ -1115,12 +950,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                             <button onClick={() => setPriceRange([0, maxPriceInData])} className="ml-1 hover:text-red-500">×</button>
                           </span>
                         )}
-                        {nearMeRadius > 0 && (
-                           <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-[#EEF2FF] text-[#4B5EAA] rounded-full text-xs font-semibold border border-[#C7D2FE]">
-                             Within {nearMeRadius} km
-                             <button onClick={() => setNearMeRadius(0)} className="ml-1 hover:text-red-500">×</button>
-                           </span>
-                        )}
+
                       </div>
                       <button onClick={clearFilters} className="text-xs text-red-500 font-semibold hover:underline">Clear All</button>
                     </div>
@@ -1130,25 +960,9 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
             </div>
 
             {/* ── Results Count ─────────────────────────────────────── */}
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-gray-500">
-                Showing <strong className="text-gray-800">{filteredProperties.length}</strong> of {propertiesWithUnits.length} properties
-              </p>
-              <div className="flex bg-gray-100 rounded-lg p-1 border border-gray-200 shadow-inner">
-                <button 
-                  onClick={() => setIsMapView(false)} 
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${!isMapView ? 'bg-white text-[#4B5EAA] shadow' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  List View
-                </button>
-                <button 
-                  onClick={() => setIsMapView(true)} 
-                  className={`px-3 py-1.5 rounded-md text-xs font-bold transition-all ${isMapView ? 'bg-[#4B5EAA] text-white shadow' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Map View
-                </button>
-              </div>
-            </div>
+            <p className="text-sm text-gray-500">
+              Showing <strong className="text-gray-800">{filteredProperties.length}</strong> of {propertiesWithUnits.length} properties
+            </p>
 
             {/* ── Property Grid or Map View ────────────────────────────── */}
             {filteredProperties.length === 0 ? (
@@ -1161,33 +975,6 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                 <button onClick={clearFilters} className="mt-4 px-4 py-2 bg-[#4B5EAA] text-white rounded-xl text-sm font-semibold hover:bg-[#3D4D8C] transition-colors">
                   Clear All Filters
                 </button>
-              </div>
-            ) : isMapView ? (
-              <div className="space-y-4 animate-fadeIn">
-                <div className="w-full h-[600px] border border-[#EAEAEA] rounded-2xl overflow-hidden shadow-sm relative z-0">
-                  <MapContainer center={position || [28.7041, 77.1025]} zoom={11} scrollWheelZoom={true} style={{ height: '100%', width: '100%' }} ref={setMapInstance}>
-                    <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-                    <LocationPicker position={position} setPosition={setPosition} />
-                    {filteredProperties.filter(p => p.coordinates).map(prop => (
-                      <Marker key={prop.id} position={prop.coordinates!}>
-                        <Popup>
-                          <div className="w-[200px]">
-                            {prop.images && prop.images[0] && <img src={prop.images[0]} className="w-full h-24 object-cover rounded-md mb-2" />}
-                            <h4 className="font-bold text-sm tracking-tight">{prop.propertyTitle}</h4>
-                            <p className="text-xs text-gray-500 mb-2 truncate">{prop.location}</p>
-                            <Button className="!py-1 !text-xs w-full" onClick={() => handleApplyClick(prop)}>View Details</Button>
-                          </div>
-                        </Popup>
-                      </Marker>
-                    ))}
-                  </MapContainer>
-                </div>
-                {position && (
-                  <div className="flex gap-4">
-                    <p className="text-xs text-[#4B5EAA] font-bold">Latitude: {position[0].toFixed(6)}</p>
-                    <p className="text-xs text-[#4B5EAA] font-bold">Longitude: {position[1].toFixed(6)}</p>
-                  </div>
-                )}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1218,11 +1005,7 @@ const TenantPanel: React.FC<TenantPanelProps> = ({ user, lang, onLogout }) => {
                               <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4"><path fillRule="evenodd" d="m9.69 18.933.003.001C9.89 19.02 10 19 10 19s.11.02.308-.066l.002-.001.006-.003.018-.008a5.741 5.741 0 0 0 .281-.14c.186-.096.446-.24.757-.433.62-.384 1.445-.966 2.274-1.765C15.302 14.988 17 12.493 17 9A7 7 0 1 0 3 9c0 3.492 1.698 5.988 3.355 7.584a13.731 13.731 0 0 0 2.273 1.765 11.842 11.842 0 0 0 .976.536l.034.017Zm.31-10.433a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z" clipRule="evenodd" /></svg>
                               {prop.location}
                             </p>
-                            {prop.coordinates && position && (
-                              <p className="text-xs text-[#4B5EAA] font-bold flex items-center gap-1 mt-1 bg-blue-50 px-2 py-0.5 rounded-full w-fit">
-                                📍 {calculateDistance(position[0], position[1], prop.coordinates.lat, prop.coordinates.lng).toFixed(1)} km away
-                              </p>
-                            )}
+
                           </div>
                           {owner && (
                             <span className="bg-purple-50 text-purple-700 text-xs font-bold px-2 py-1 rounded flex items-center gap-1">

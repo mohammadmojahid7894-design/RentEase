@@ -63,7 +63,6 @@ export interface Property {
   ownerId: string;
   propertyTitle: string;
   location: string;
-  coordinates?: { lat: number; lng: number };
   rentAmount: number;
   securityDeposit?: number;
   description: string;
