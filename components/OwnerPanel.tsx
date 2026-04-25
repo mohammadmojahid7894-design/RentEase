@@ -1564,8 +1564,31 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
             </div>
             <div>
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Property Images (Multiple)</label>
-              <input type="file" multiple accept="image/*" onChange={e => setNewPropertyImages(Array.from(e.target.files || []))} className="w-full p-2 border border-[#EAEAEA] bg-[#F9F8F6] rounded-xl" />
-              {newPropertyImages.length > 0 && <p className="text-xs text-gray-500 mt-1 pl-1">{newPropertyImages.length} images selected.</p>}
+              <label className="flex flex-col items-center justify-center w-full p-4 border-2 border-dashed border-[#C7D2FE] bg-[#F5F7FF] rounded-xl cursor-pointer hover:bg-[#EEF2FF] transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-7 h-7 text-[#4B5EAA] mb-1"><path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" /></svg>
+                <span className="text-sm font-semibold text-[#4B5EAA]">Click to select images</span>
+                <span className="text-xs text-gray-400 mt-0.5">PNG, JPG, WEBP — multiple allowed</span>
+                <input type="file" multiple accept="image/*" className="hidden" onChange={e => setNewPropertyImages(Array.from(e.target.files || []))} />
+              </label>
+              {newPropertyImages.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold text-gray-500 mb-2">{newPropertyImages.length} image{newPropertyImages.length > 1 ? 's' : ''} selected</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {newPropertyImages.map((file, i) => (
+                      <div key={i} className="relative group rounded-lg overflow-hidden border border-[#EAEAEA] aspect-square bg-gray-100">
+                        <img src={URL.createObjectURL(file)} alt={`Preview ${i + 1}`} className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setNewPropertyImages(prev => prev.filter((_, idx) => idx !== i))}
+                          className="absolute top-1 right-1 w-5 h-5 bg-red-600 text-white rounded-full text-xs font-bold leading-none flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow"
+                          title="Remove"
+                        >&times;</button>
+                        <div className="absolute bottom-0 left-0 right-0 bg-black/40 text-white text-[9px] text-center py-0.5 truncate px-1">{file.name}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-[#2D3436] mb-1">Property Type</label>
@@ -1650,7 +1673,7 @@ const OwnerPanel: React.FC<OwnerPanelProps> = ({ user, lang, onLogout }) => {
             </div>
             <div className="flex gap-3 mt-6">
               <Button type="button" variant="outline" onClick={() => setIsPropertyModalOpen(false)} fullWidth>Cancel</Button>
-              <Button type="submit" disabled={addingProperty || !newProperty.coordinates} fullWidth>{addingProperty ? 'Saving...' : 'Save Property'}</Button>
+              <Button type="submit" disabled={addingProperty} fullWidth>{addingProperty ? 'Saving...' : 'Save Property'}</Button>
             </div>
           </form>
         </Modal>
