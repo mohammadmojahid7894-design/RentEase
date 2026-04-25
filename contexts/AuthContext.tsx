@@ -23,45 +23,14 @@ const SESSION_KEY = 'sessionUser';
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    console.log("App loaded");
-    console.log("Loading start");
-    setLoading(true);
-
-    const fallbackTimeout = setTimeout(() => {
-      setLoading(false);
-      console.log("Loading end (custom auth)");
-    }, 4000); // 4000ms fallback fix to avoid infinite loading
-
-    return () => {
-      clearTimeout(fallbackTimeout);
-    };
-  }, []);
-
-  // Restore our custom system ID session
-  useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem(SESSION_KEY);
-      if (storedUser) {
-        setCurrentUser(JSON.parse(storedUser));
-      }
-    } catch {
-      localStorage.removeItem(SESSION_KEY);
-    }
-  }, []);
+  // Always start as not loading — no async session restore
+  const [loading, setLoading] = useState(false);
 
   const login = async (user: User) => {
-    setLoading(true);
-    try {
-      setCurrentUser(user);
-      localStorage.setItem(SESSION_KEY, JSON.stringify(user));
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
+    setCurrentUser(user);
+    // Persist only for this tab's lifetime; do NOT restore on next load
+    // (localStorage write kept so it can be read by other utilities if needed)
+    localStorage.setItem(SESSION_KEY, JSON.stringify(user));
   };
 
   const logout = () => {
@@ -72,7 +41,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const value = {
     currentUser,
     loading,
-    isAdmin: currentUser?.role === UserRole.OWNER,
+    isAdmin: currentUser?.role === UserRole.ADMIN,
     login,
     logout
   };

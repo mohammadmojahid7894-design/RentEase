@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { User, UserRole, Property, Payment, Complaint, PaymentStatus, ComplaintStatus } from './types';
 import OwnerPanel from './components/OwnerPanel';
 import TenantPanel from './components/TenantPanel';
@@ -15,8 +15,15 @@ const AppContent: React.FC = () => {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
   const [authRole, setAuthRole] = useState<UserRole>(UserRole.TENANT);
 
-  // Set View based on Role
+  const isInitialMount = useRef(true);
+
+  // Redirect to dashboard ONLY after an explicit login — skip on first render
+  // so the landing page always shows on refresh/direct load.
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false;
+      return; // Do nothing on initial mount
+    }
     if (currentUser) {
       if (currentUser.role === UserRole.ADMIN) {
         setView('admin');
@@ -45,9 +52,6 @@ const AppContent: React.FC = () => {
   };
 
 
-  if (!currentUser && view !== 'landing' && view !== 'auth') {
-    return <div className="flex items-center justify-center h-screen">Loading...</div>;
-  }
 
   return (
     <div className="animate-fadeIn">
